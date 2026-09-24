@@ -240,7 +240,7 @@ fun App() {
             SettingsScreen(
                 connected = connected,
                 lastSync = lastSync,
-                onBack = { settingsOpen = false },
+                onBack = { settingsOpen = false; tick++ }, // tick: re-read the update badge
                 onConnect = { ctx.startActivity(Intent(ctx, LoginActivity::class.java)) },
                 onDisconnect = {
                     CookieManager.getInstance().removeAllCookies(null) // so "Connect" asks for a fresh login
