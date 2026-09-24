@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Never back up the Amizone session cookies (prefs.xml) or the WebView's own cookie store. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="prefs.xml" />
+    <exclude domain="root" path="app_webview" />
+</full-backup-content>

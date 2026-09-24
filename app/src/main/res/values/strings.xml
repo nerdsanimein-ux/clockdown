@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Clockdown</string>
+    <string name="widget_description">A live countdown to one timer or class you choose</string>
+    <string name="widget_timers_description">A list of your next events, each with a live countdown</string>
+    <string name="widget_classes_description">Your next class, and the rest of that day</string>
+    <string name="widget_label_timer">Clockdown timer</string>
+    <string name="widget_label_classes">Clockdown classes</string>
+    <string name="widget_label_list">Clockdown list</string>
+</resources>

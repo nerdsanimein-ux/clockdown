@@ -1,0 +1,32 @@
+# --- Signing keys and secrets: never commit these ---
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+local.properties
+.env
+.env.*
+*.pem
+secrets.*
+credentials.*
+google-services.json
+
+# --- Build output and tooling ---
+build/
+/build
+/app/release
+*.apk
+*.aab
+.gradle/
+.kotlin/
+.idea/
+*.iml
+.externalNativeBuild
+.cxx
+/captures
+
+# --- OS and editor noise ---
+.DS_Store
+Thumbs.db
+*.log

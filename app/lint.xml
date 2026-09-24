@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- local.properties holds this machine's SDK and signing paths. It is git-ignored and never shipped, and this check
+         disagrees with Android Studio's own formatting of it. -->
+    <issue id="PropertyEscape">
+        <ignore path="**/local.properties" />
+    </issue>
+</lint>
