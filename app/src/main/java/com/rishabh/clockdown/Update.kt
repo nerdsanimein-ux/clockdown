@@ -65,8 +65,14 @@ fun parseRelease(json: String): UpdateInfo? {
     )
 }
 
-/** Release notes are written as markdown; show them as plain, friendly text. */
-fun cleanNotes(md: String): String = md.lines().joinToString("\n") { line ->
+/**
+ * Release notes are written as markdown; show them as plain, friendly text. The dialog already has its own
+ * "What's new" label, so a leading heading with that name is dropped rather than shown twice.
+ */
+fun cleanNotes(md: String): String = md.lines().dropWhile { it.isBlank() }.let { lines ->
+    val first = lines.firstOrNull()?.trim()?.trimStart('#')?.trim()
+    if (first.equals("what's new", ignoreCase = true)) lines.drop(1) else lines
+}.joinToString("\n") { line ->
     val t = line.trim()
     when {
         t.startsWith("#") -> t.trimStart('#').trim()

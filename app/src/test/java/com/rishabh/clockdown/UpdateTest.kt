@@ -33,6 +33,7 @@ class UpdateTest {
 
     @Test
     fun turnsMarkdownNotesIntoPlainText() {
-        assertEquals("What's new\n• Faster sync\n• New widgets\n\nThanks!", cleanNotes(parseRelease(release("2"))!!.notes))
+        assertEquals("• Faster sync\n• New widgets\n\nThanks!", cleanNotes(parseRelease(release("2"))!!.notes))
+        assertEquals("Fixes\n• One bug", cleanNotes("## Fixes\n- One bug")) // other headings are kept
     }
 }
