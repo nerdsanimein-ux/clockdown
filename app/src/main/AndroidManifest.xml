@@ -56,6 +56,9 @@
             android:exported="false"
             android:label="Connect Amizone" />
 
+        <!-- Crash reporting is started by our own code, so the user's off-switch is respected (see CrashReporting). -->
+        <meta-data android:name="io.sentry.auto-init" android:value="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"

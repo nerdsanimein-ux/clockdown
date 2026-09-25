@@ -51,4 +51,13 @@ class WidgetStyleTest {
         assertEquals(true, own.copy(id = 5).styleIndex() in 0..2) // automatic: ring, dots or bars, never none
         assertEquals(true, cls.styleIndex() in 0..2)
     }
+
+    @Test
+    fun crashReportsBlankSecretsAndIds() {
+        assertEquals("boom cookie=[removed]", CrashReporting.scrub("boom cookie=ASP.NET_SessionId=abc; .ASPXAUTH=def"))
+        assertEquals("id # failed", CrashReporting.scrub("id 12345678 failed"))
+        assertEquals("token [removed]", CrashReporting.scrub("token " + "A".repeat(40)))
+        assertEquals(true, CrashReporting.scrub("word ".repeat(100))!!.length <= 300)
+        assertEquals("Cannot access database on the main thread", CrashReporting.scrub("Cannot access database on the main thread"))
+    }
 }

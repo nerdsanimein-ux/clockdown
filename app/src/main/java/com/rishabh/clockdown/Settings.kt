@@ -224,6 +224,19 @@ fun SettingsScreen(
                 )
             }
 
+            Group("Crash reports") {
+                var on by remember { mutableStateOf(CrashReporting.enabled(ctx)) }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Send crash reports", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    Switch(on, { on = it; CrashReporting.setEnabled(ctx, it) })
+                }
+                Text(
+                    "If Clockdown crashes, it can send a short report so the problem can be fixed. It contains the error and your phone model, " +
+                        "never your Amizone ID or password, your timetable or your name.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Group("Installing Clockdown") {
                 Text(
                     "Why Android warns about apps that don't come from the Play Store, and what to tap. Handy to show a friend.",

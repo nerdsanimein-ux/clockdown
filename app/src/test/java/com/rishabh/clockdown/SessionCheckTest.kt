@@ -36,4 +36,23 @@ class SessionCheckTest {
         assertEquals(Verdict.PROBLEM, v(404, "text/html", "<html>not found</html>")) // endpoint moved: don't say "sign in"
         assertEquals(Verdict.PROBLEM, v(429, null, ""))
     }
+
+    private val hour = 3_600_000L
+
+    @Test
+    fun oneFailedRefreshRightAfterAConfirmedOneDoesNotWarn() {
+        assertEquals(false, shouldWarnUnconfirmed(true, expired = false, flagged = true, lastSync = 10 * hour, now = 10 * hour + 7 * 60_000))
+    }
+
+    @Test
+    fun aTimetableUnconfirmedForHoursDoesWarn() {
+        assertEquals(true, shouldWarnUnconfirmed(true, expired = false, flagged = true, lastSync = 10 * hour, now = 14 * hour))
+    }
+
+    @Test
+    fun anExpiredSignInAlwaysWarnsAndNothingWarnsWhenNotFlaggedOrNotConnected() {
+        assertEquals(true, shouldWarnUnconfirmed(true, expired = true, flagged = true, lastSync = 10 * hour, now = 10 * hour + 1))
+        assertEquals(false, shouldWarnUnconfirmed(true, expired = false, flagged = false, lastSync = 1, now = 99 * hour))
+        assertEquals(false, shouldWarnUnconfirmed(false, expired = true, flagged = true, lastSync = 1, now = 99 * hour))
+    }
 }

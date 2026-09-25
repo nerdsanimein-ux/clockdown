@@ -7,7 +7,7 @@ Clockdown counts down to the things you don't want to miss, so you can stop chec
 - **Countdowns for anything.** Create your own timers with a name, date, time, emoji and colour, and get an alarm before they start.
 - **Your classes, automatically.** Connect your Amizone account once and your timetable shows up with live countdowns and alarms. You sign in on Amizone's own page. To make signing in again quicker, your ID and password can be kept encrypted on your phone (never sent anywhere except Amizone's own sign-in page), and you can delete them any time in Settings.
 - **Home screen widgets.** A live ticking timer, your next classes, or a list of what's coming up, in your choice of looks: solid cards, gradients, bold, see-through glass and mono that adapt to your wallpaper, and more. Set one look for all class timers, or give each widget its own. After saving a timer, one tap puts it on your home screen.
-- **Private by design.** No ads, no tracking, no analytics. Everything stays on your phone. The only internet use is talking to Amizone (if you connect it) and checking this page for new versions.
+- **Private by design.** No ads, no tracking, no analytics. Everything stays on your phone. The only internet use is talking to Amizone (if you connect it), checking this page for new versions, and, if the app crashes, sending a short crash report (the error and your phone model, never your ID, password or timetable). You can switch crash reports off in Settings.
 
 ## Install (Android 8 or newer)
 

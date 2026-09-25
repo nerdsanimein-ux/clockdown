@@ -37,6 +37,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.time.LocalDate
@@ -60,8 +61,22 @@ val Context.amizoneConnected get() = Session.active(this)
 /** True once a sync has found the session dead: the user has to sign in again. */
 val Context.sessionExpired get() = prefs.getBoolean("sessionExpired", false)
 
+/** Why the most recent sync could not confirm the timetable (a short label, never any content), for diagnosing "Unconfirmed". */
+val Context.lastFailure: String? get() = prefs.getString("lastFailure", null)
+
 /** When the timetable on screen was last confirmed, if it currently can't be (a sync failed); null when it is up to date. 0 = never. */
-val Context.unconfirmedSince: Long? get() = if (amizoneConnected && prefs.getBoolean("unconfirmed", false)) prefs.getLong("lastSync", 0) else null
+val Context.unconfirmedSince: Long? get() =
+    if (shouldWarnUnconfirmed(amizoneConnected, sessionExpired, prefs.getBoolean("unconfirmed", false), prefs.getLong("lastSync", 0), System.currentTimeMillis())) prefs.getLong("lastSync", 0) else null
+
+/** How old the last confirmed timetable may get before a failed refresh is worth a warning. One blip shouldn't cry wolf. */
+const val STALE_AFTER_MS = 3 * 60 * 60 * 1000L
+
+/**
+ * The "Unconfirmed" warning: always when the sign-in has expired, but for a plain failed refresh (no network, server
+ * hiccup) only once the last confirmed timetable is a few hours old. A timetable confirmed ten minutes ago isn't in doubt.
+ */
+fun shouldWarnUnconfirmed(connected: Boolean, expired: Boolean, flagged: Boolean, lastSync: Long, now: Long): Boolean =
+    connected && flagged && (expired || lastSync == 0L || now - lastSync > STALE_AFTER_MS)
 
 /** Lead time for class alarms; 0 when the user turned class alarms off. */
 val Context.classAlarmMinutes get() = if (prefs.getBoolean("classAlarm", true)) prefs.getInt("classMinutes", 10) else 0
@@ -122,12 +137,12 @@ object AmizoneSync {
         val rows = mutableListOf<JSONArray>()
         val log = StringBuilder() // shown in the debug viewer: status and body only, never cookies
         for (day in (0L..7L).map { today.plusDays(it) }) {
-            val r = try { fetchDay(day, cookies, ua) } catch (e: IOException) { return failed(ctx) }
+            val r = try { fetchDay(day, cookies, ua) } catch (e: IOException) { return failed(ctx, "no connection (${e.javaClass.simpleName})") }
             log.append("== $day  HTTP ${r.code}\n${r.body.take(30_000)}\n\n")
             when (SessionCheck.classify(r.code, r.contentType, r.body)) {
-                Verdict.OK -> rows += JSONArray(SessionCheck.trimBody(r.body))
+                Verdict.OK -> rows += try { JSONArray(SessionCheck.trimBody(r.body)) } catch (e: JSONException) { return failed(ctx, "unreadable reply for $day") }
                 Verdict.EXPIRED -> { p.edit().putString("lastJson", log.toString()).apply(); return expired(ctx) }
-                Verdict.PROBLEM -> { p.edit().putString("lastJson", log.toString()).apply(); return failed(ctx) }
+                Verdict.PROBLEM -> { p.edit().putString("lastJson", log.toString()).apply(); return failed(ctx, "unexpected reply HTTP ${r.code} for $day") }
             }
         }
         p.edit().putString("lastJson", log.toString().take(200_000)).apply()
@@ -136,13 +151,13 @@ object AmizoneSync {
         val now = System.currentTimeMillis()
         val endMs = end.atStartOfDay(IST).toInstant().toEpochMilli()
         // A row we can't parse must not wipe the timetable: keep old events and report failure.
-        val fresh = try { rows.flatMap { parseClasses(it) } } catch (e: Exception) { return failed(ctx) }
+        val fresh = try { rows.flatMap { parseClasses(it) } } catch (e: Exception) { return failed(ctx, "could not read the timetable") }
             .distinctBy { it.amizoneId }
             .filter { it.startMillis in (now + 1) until endMs }
             .sortedBy { it.startMillis }
 
         AppDb.get(ctx).replaceAmizone(now, endMs, fresh).forEach { Scheduler.cancel(ctx, it) }
-        p.edit().putLong("lastSync", now).putBoolean("unconfirmed", false).putBoolean("sessionExpired", false).apply()
+        p.edit().putLong("lastSync", now).putBoolean("unconfirmed", false).putBoolean("sessionExpired", false).remove("lastFailure").apply()
         Scheduler.rescheduleAll(ctx) // also refreshes the widgets, which drop their "Unconfirmed" note
         ctx.getSystemService(NotificationManager::class.java).cancel(SIGN_IN_ID)
         return SyncResult.OK
@@ -167,7 +182,18 @@ object AmizoneSync {
         Scheduler.refreshWidget(ctx)
     }
 
-    private fun failed(ctx: Context): SyncResult { markUnconfirmed(ctx); return SyncResult.FAILED }
+    private fun failed(ctx: Context, why: String): SyncResult {
+        ctx.prefs.edit().putString("lastFailure", "${java.time.LocalTime.now(IST).withNano(0)} $why").apply()
+        if (!why.startsWith("no connection")) CrashReporting.note("sync failed: $why") // a dropped connection is normal; anything else is worth knowing
+        markUnconfirmed(ctx)
+        // Don't wait for the next 6-hourly check: try again in 15 minutes, as soon as there is a connection.
+        WorkManager.getInstance(ctx).enqueueUniqueWork(
+            "amizone-retry", androidx.work.ExistingWorkPolicy.KEEP,
+            androidx.work.OneTimeWorkRequestBuilder<SyncWorker>().setInitialDelay(15, TimeUnit.MINUTES)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build(),
+        )
+        return SyncResult.FAILED
+    }
 
     private fun expired(ctx: Context): SyncResult {
         ctx.prefs.edit().putBoolean("sessionExpired", true).apply()

@@ -23,10 +23,12 @@ android {
         targetSdk = 36
         // Bump versionCode by 1 for EVERY release (a whole number; Android and the in-app updater compare it).
         // versionName is only the label people see, e.g. "1.1". The GitHub release tag must equal versionCode.
-        versionCode = 1
+        versionCode = 2
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Where crash reports go. Lives in local.properties (git-ignored); empty means crash reporting is simply off.
+        buildConfigField("String", "SENTRY_DSN", "\"${localProps.getProperty("sentry.dsn", "")}\"")
     }
 
     signingConfigs {
@@ -58,6 +60,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -81,6 +84,7 @@ dependencies {
     implementation(libs.androidx.work.runtime)
     implementation(libs.okhttp)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.sentry.android.core) // crash reports (see CrashReporting)
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver) // a fake GitHub for the updater tests
     testImplementation(libs.org.json) // real org.json for JVM tests; android.jar only has stubs

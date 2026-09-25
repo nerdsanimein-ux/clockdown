@@ -152,6 +152,9 @@ fun App() {
     var settingsOpen by remember { mutableStateOf(false) }
     var pinEvent by remember { mutableStateOf<Event?>(null) } // a timer that was just saved: offer to put it on the home screen
     var addWidgetOpen by remember { mutableStateOf(false) }
+    // null while we check whether this is a first run; nothing is asked of the person until then.
+    var onboarding by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) { onboarding = withContext(Dispatchers.IO) { Onboarding.needed(ctx) } }
     val connected = remember(tick) { ctx.amizoneConnected }
 
     // Manual = user pressed the sync button (always runs, always reports); otherwise skip if synced under a minute ago.
@@ -183,7 +186,8 @@ fun App() {
     var batteryDialog by remember { mutableStateOf(false) }
     val askBatteryOnce = { if (Battery.shouldAskNow(ctx)) batteryDialog = true }
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { askBatteryOnce() }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(onboarding) {
+        if (onboarding != false) return@LaunchedEffect // permission prompts wait until the welcome flow is done
         if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS) else askBatteryOnce()
         withContext(Dispatchers.IO) { Widgets.publishPreviews(ctx) }
     }
@@ -229,6 +233,14 @@ fun App() {
                     ),
                 ),
         )
+
+        if (onboarding == true) {
+            OnboardingScreen(
+                connected = connected,
+                onSignIn = { ctx.startActivity(Intent(ctx, LoginActivity::class.java)) },
+                onDone = { Onboarding.finish(ctx); onboarding = false; sync(manual = false) },
+            )
+        }
 
         val spatial = spring<androidx.compose.ui.unit.IntOffset>(dampingRatio = 0.85f, stiffness = 380f)
         AnimatedVisibility(
