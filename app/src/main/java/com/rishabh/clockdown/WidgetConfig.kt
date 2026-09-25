@@ -19,18 +19,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -55,16 +59,17 @@ class WidgetConfigActivity : ComponentActivity() {
         if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return }
 
         val provider = AppWidgetManager.getInstance(this).getAppWidgetInfo(widgetId)?.provider?.className
-        val forList = provider == TimersWidget::class.java.name
+        val kind = when (provider) { TimersWidget::class.java.name -> Kind.LIST; ClassesWidget::class.java.name -> Kind.CLASSES; else -> Kind.TIMER }
         setContent {
             ClockdownTheme {
-                ConfigScreen(forList, current = WidgetPrefs.get(this, widgetId), onPick = ::save)
+                ConfigScreen(kind, current = WidgetPrefs.get(this, widgetId), currentStyle = WidgetPrefs.style(this, widgetId), onSave = ::save)
             }
         }
     }
 
-    private fun save(value: String, name: String?) {
-        WidgetPrefs.set(this, widgetId, value, name)
+    private fun save(value: String?, name: String?, style: WidgetStyle?) {
+        if (value != null) WidgetPrefs.set(this, widgetId, value, name)
+        WidgetPrefs.setStyle(this, widgetId, style)
         // Draw the widget before reporting success, so it never shows a stale or empty layout after placement.
         thread {
             Scheduler.refreshWidget(applicationContext)
@@ -77,33 +82,70 @@ class WidgetConfigActivity : ComponentActivity() {
 }
 
 @Composable
-private fun ConfigScreen(forList: Boolean, current: String?, onPick: (String, String?) -> Unit) {
+private fun ConfigScreen(kind: Kind, current: String?, currentStyle: WidgetStyle?, onSave: (String?, String?, WidgetStyle?) -> Unit) {
     val ctx = LocalContext.current
     val events by remember { AppDb.get(ctx).all() }.collectAsState(emptyList())
     val now = System.currentTimeMillis()
     val timers = events.filter { it.source == MANUAL && it.startMillis > now }
+    val classes = events.filter { it.source == AMIZONE && it.startMillis > now }
+
+    // Nothing is saved until Save, so a widget can be restyled without re-choosing what it shows.
+    var choice by remember { mutableStateOf(current ?: if (kind == Kind.LIST) WidgetPrefs.LIST_ALL else null) }
+    var choiceName by remember { mutableStateOf<String?>(null) }
+    var style by remember { mutableStateOf(currentStyle) }
+    var backdrop by remember { mutableStateOf(Backdrop.DARK) }
+    val canSave = kind != Kind.TIMER || choice != null
+
+    // What the previews show: the timer picked, else the next real one, else a made-up class.
+    val shown = when {
+        kind == Kind.TIMER && choice?.startsWith(WidgetPrefs.TIMER_EVENT) == true ->
+            events.firstOrNull { it.id == choice!!.removePrefix(WidgetPrefs.TIMER_EVENT).toIntOrNull() }
+        kind == Kind.TIMER && choice == WidgetPrefs.TIMER_NEXT_CLASS -> classes.firstOrNull()
+        kind == Kind.TIMER && choice == WidgetPrefs.TIMER_NEXT_TIMER -> timers.firstOrNull()
+        else -> null
+    } ?: (timers + classes).minByOrNull { it.startMillis } ?: sampleClass(now)
+    val sampleClasses = classes.ifEmpty { listOf(sampleClass(now), sampleClass(now, 200, "Marketing Basics", "MB101")) }
+    val sampleList = (timers + classes).sortedBy { it.startMillis }.take(3).ifEmpty { sampleClasses }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.statusBarsPadding().padding(horizontal = 20.dp)) {
+        Column(Modifier.statusBarsPadding().navigationBarsPadding().padding(horizontal = 20.dp)) {
             Spacer(Modifier.height(24.dp))
-            Text(if (forList) "List widget" else "Timer widget", style = MaterialTheme.typography.displaySmall)
+            Text(when (kind) { Kind.LIST -> "List widget"; Kind.CLASSES -> "Classes widget"; Kind.TIMER -> "Timer widget" }, style = MaterialTheme.typography.displaySmall)
             Text(
-                "Choose what this widget shows. You can change it later with a long-press on the widget.",
+                if (kind == Kind.CLASSES) "Choose how this widget looks. You can change it later with a long-press on the widget."
+                else "Choose what this widget shows and how it looks. You can change it later with a long-press on the widget.",
                 style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
             )
             LazyColumn(
+                Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 32.dp),
+                contentPadding = PaddingValues(bottom = 16.dp),
             ) {
-                if (forList) {
-                    item { Choice("All events", "Classes and timers together, soonest first", "📋", current in listOf(null, WidgetPrefs.LIST_ALL)) { onPick(WidgetPrefs.LIST_ALL, null) } }
-                    item { Choice("Classes only", "Just your next classes", "🎓", current == WidgetPrefs.LIST_CLASSES) { onPick(WidgetPrefs.LIST_CLASSES, null) } }
-                    item { Choice("My timers only", "Just the timers you created", "⏳", current == WidgetPrefs.LIST_TIMERS) { onPick(WidgetPrefs.LIST_TIMERS, null) } }
-                } else {
+                item { Label("Look") }
+                item { BackdropChooser(backdrop) { backdrop = it } }
+                item {
+                    StylePicker(
+                        style, { style = it }, backdrop, automatic = "Automatic",
+                        columns = if (kind == Kind.TIMER) 2 else 1, tileHeight = if (kind == Kind.TIMER) 148.dp else 250.dp,
+                    ) { c, st, light ->
+                        when (kind) {
+                            Kind.TIMER -> Widgets.timerView(c, shown, st, now, null, light)
+                            Kind.CLASSES -> Widgets.classesView(c, sampleClasses, st, now, null, light)
+                            Kind.LIST -> Widgets.listView(c, sampleList, "Coming up", "", st, now, null, light)
+                        }
+                    }
+                }
+                if (kind == Kind.LIST) {
+                    item { Label("Show") }
+                    item { Choice("All events", "Classes and timers together, soonest first", "\uD83D\uDCCB", choice == WidgetPrefs.LIST_ALL) { choice = WidgetPrefs.LIST_ALL } }
+                    item { Choice("Classes only", "Just your next classes", "\uD83C\uDF93", choice == WidgetPrefs.LIST_CLASSES) { choice = WidgetPrefs.LIST_CLASSES } }
+                    item { Choice("My timers only", "Just the timers you created", "\u23F3", choice == WidgetPrefs.LIST_TIMERS) { choice = WidgetPrefs.LIST_TIMERS } }
+                }
+                if (kind == Kind.TIMER) {
                     item { Label("Always the next one") }
-                    item { Choice("Next custom timer", "Switches to the following timer when one passes", "⏳", current == WidgetPrefs.TIMER_NEXT_TIMER) { onPick(WidgetPrefs.TIMER_NEXT_TIMER, null) } }
-                    item { Choice("Next class", "Switches to the following class when one starts", "🎓", current == WidgetPrefs.TIMER_NEXT_CLASS) { onPick(WidgetPrefs.TIMER_NEXT_CLASS, null) } }
+                    item { Choice("Next custom timer", "Switches to the following timer when one passes", "\u23F3", choice == WidgetPrefs.TIMER_NEXT_TIMER) { choice = WidgetPrefs.TIMER_NEXT_TIMER; choiceName = null } }
+                    item { Choice("Next class", "Switches to the following class when one starts", "\uD83C\uDF93", choice == WidgetPrefs.TIMER_NEXT_CLASS) { choice = WidgetPrefs.TIMER_NEXT_CLASS; choiceName = null } }
                     item { Label("A specific timer") }
                     if (timers.isEmpty()) {
                         item {
@@ -115,12 +157,16 @@ private fun ConfigScreen(forList: Boolean, current: String?, onPick: (String, St
                     }
                     items(timers, key = { it.id }) { e ->
                         Choice(
-                            e.title(), e.subtitle(), e.emojiOrDefault(), current == WidgetPrefs.TIMER_EVENT + e.id,
+                            e.title(), e.subtitle(), e.emojiOrDefault(), choice == WidgetPrefs.TIMER_EVENT + e.id,
                             accent = paletteColor(e.colorIndex()),
-                        ) { onPick(WidgetPrefs.TIMER_EVENT + e.id, e.title()) }
+                        ) { choice = WidgetPrefs.TIMER_EVENT + e.id; choiceName = e.title() }
                     }
                 }
             }
+            Button(
+                onClick = { onSave(if (kind == Kind.CLASSES) null else choice, choiceName, style) }, enabled = canSave,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            ) { Text(if (canSave) "Save" else "Choose what to show first") }
         }
     }
 }

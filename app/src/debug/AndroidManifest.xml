@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Test hooks. This file exists only in debug builds. Only callers holding android.permission.DUMP
+             (the adb shell, not other apps) may use it, and it never accepts or returns a password or cookie. -->
+        <receiver
+            android:name=".DebugHooks"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="com.rishabh.clockdown.DEBUG_CORRUPT_PASSWORD" />
+                <action android:name="com.rishabh.clockdown.DEBUG_EXPIRE_SESSION" />
+                <action android:name="com.rishabh.clockdown.DEBUG_RESET_BATTERY_PROMPT" />
+                <action android:name="com.rishabh.clockdown.DEBUG_STATUS" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Preview gallery for reviewing widget styles; debug builds only. -->
+        <activity android:name=".StyleGalleryActivity" android:exported="true" android:excludeFromRecents="true" />
+    </application>
+</manifest>

@@ -63,7 +63,7 @@ fun EmojiBadge(emoji: String, tint: Color, size: Dp, modifier: Modifier = Modifi
     ) { Text(emoji, fontSize = (size.value * 0.5f).sp) }
 }
 
-/** Ring, dots or bars (style 0, 1, 2) filling as [progress] goes 0..1, springing to each new value. */
+/** Ring, dots or bars (style 0, 1, 2; 3 draws nothing) filling as [progress] goes 0..1, springing to each new value. */
 @Composable
 fun ProgressVisual(style: Int, progress: Float, color: Color, modifier: Modifier = Modifier) {
     val p by animateFloatAsState(progress, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessVeryLow), label = "progress")
@@ -86,6 +86,7 @@ fun ProgressVisual(style: Int, progress: Float, color: Color, modifier: Modifier
                 drawCircle(if (i < filled) color else track, cell * 0.32f, c)
             }
         }
+        3 -> Unit
         else -> Canvas(modifier.fillMaxWidth().height(34.dp)) {
             val n = 14
             val gap = size.width * 0.02f

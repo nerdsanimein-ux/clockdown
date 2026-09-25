@@ -25,7 +25,7 @@ class StyleTest {
 
     @Test
     fun colorIndexIsStableAndInRange() {
-        val a = Event(id = 1, name = "x", startMillis = 0, source = AMIZONE, courseCode = "CSSU3105")
+        val a = Event(id = 1, name = "x", startMillis = 0, source = AMIZONE, courseCode = "XY101")
         val b = a.copy(id = 99, startMillis = 5) // same course, different session
         assertEquals(a.colorIndex(), b.colorIndex())
         assertEquals(true, Event(id = -7, name = "m", startMillis = 0).colorIndex() in 0..7)

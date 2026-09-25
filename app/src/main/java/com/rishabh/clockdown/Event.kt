@@ -36,6 +36,8 @@ data class Event(
     val emoji: String? = null,
     val colorIdx: Int? = null,
     val progressStyle: Int? = null,
+    /** A [WidgetStyle] id, or null to follow the default (see resolveStyle). */
+    val widgetStyle: String? = null,
 )
 
 @Dao
@@ -49,8 +51,9 @@ abstract class EventDao {
     @Query("SELECT * FROM events WHERE id = :id")
     abstract fun byId(id: Int): Event?
 
+    /** Returns the new row id for an insert, or -1 for an update of an existing row. */
     @Upsert
-    abstract fun upsert(event: Event)
+    abstract fun upsert(event: Event): Long
 
     @Delete
     abstract fun delete(event: Event)
@@ -109,7 +112,13 @@ private val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
-@Database(entities = [Event::class], version = 3, exportSchema = true)
+private val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE events ADD COLUMN widgetStyle TEXT")
+    }
+}
+
+@Database(entities = [Event::class], version = 4, exportSchema = true)
 abstract class AppDb : RoomDatabase() {
     abstract fun events(): EventDao
 
@@ -118,7 +127,7 @@ abstract class AppDb : RoomDatabase() {
 
         fun get(ctx: Context): EventDao = (db ?: synchronized(this) {
             db ?: Room.databaseBuilder(ctx.applicationContext, AppDb::class.java, "clockdown.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build().also { db = it }
         }).events()
     }

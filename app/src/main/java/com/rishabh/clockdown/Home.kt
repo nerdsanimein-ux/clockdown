@@ -5,7 +5,6 @@ package com.rishabh.clockdown
 import android.Manifest
 import android.content.Intent
 import android.os.Build
-import android.webkit.CookieManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -71,6 +70,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -102,6 +103,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.material3.AssistChip
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -111,6 +113,9 @@ import java.time.format.FormatStyle
 import java.util.Locale
 import kotlin.math.roundToInt
 
+/** True while the class timetable on screen could not be confirmed by the latest sync (see AmizoneSync). */
+val LocalUnconfirmed = staticCompositionLocalOf { false }
+
 internal val zone: ZoneId get() = ZoneId.systemDefault()
 internal fun Long.toLocal(): LocalDateTime = Instant.ofEpochMilli(this).atZone(zone).toLocalDateTime()
 
@@ -118,7 +123,7 @@ private val TIME = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 private val DAY_SHORT get() = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
 private fun shortLeft(ms: Long) = leftText(ms).removeSuffix(" left")
 
-/** "Fri 25 Sep · 9:30 am – 10:25 am · Haryana-B - 411A". */
+/** "Fri 25 Sep · 9:30 am – 10:25 am · Block A - 101" (the room only when there is one). */
 internal fun Event.subtitle(): String {
     val start = startMillis.toLocal()
     val time = start.format(TIME) + (endMillis?.let { " – " + it.toLocal().format(TIME) } ?: "")
@@ -145,6 +150,8 @@ fun App() {
     var editor by remember { mutableStateOf<Event?>(null) } // kept after closing so the exit animation still has content
     var editorOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var pinEvent by remember { mutableStateOf<Event?>(null) } // a timer that was just saved: offer to put it on the home screen
+    var addWidgetOpen by remember { mutableStateOf(false) }
     val connected = remember(tick) { ctx.amizoneConnected }
 
     // Manual = user pressed the sync button (always runs, always reports); otherwise skip if synced under a minute ago.
@@ -153,33 +160,54 @@ fun App() {
         if (!manual && System.currentTimeMillis() - ctx.prefs.getLong("lastSync", 0) < 60_000) return
         syncing = true
         scope.launch {
-            val result = withContext(Dispatchers.IO) { AmizoneSync.run(ctx) }
+            val result = withContext(Dispatchers.IO) { AmizoneSync.run(ctx, force = manual) }
             syncing = false
             tick++
             if (manual) Toast.makeText(ctx, result.message, Toast.LENGTH_SHORT).show()
         }
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        Battery.refresh(ctx) // remembers if the exemption is on, so losing it later can be reported
         tick++; sync(manual = false)
         // Cheap: answers from the cache unless the last check is over 12 hours old.
-        scope.launch { withContext(Dispatchers.IO) { UpdateChecker.check(ctx, manual = false) }; tick++ }
+        // An update we already know about is re-checked every time (cheap, conditional), so a withdrawn release loses its badge.
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                UpdateChecker.check(ctx, if (UpdateChecker.available(ctx) != null) CheckMode.REVALIDATE else CheckMode.AUTO)
+            }
+            tick++
+        }
     }
     val updateReady = remember(tick) { UpdateChecker.available(ctx) != null }
 
-    val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    var batteryDialog by remember { mutableStateOf(false) }
+    val askBatteryOnce = { if (Battery.shouldAskNow(ctx)) batteryDialog = true }
+    val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { askBatteryOnce() }
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS) else askBatteryOnce()
         withContext(Dispatchers.IO) { Widgets.publishPreviews(ctx) }
     }
+    if (batteryDialog) BatteryDialog { batteryDialog = false; tick++ }
+    pinEvent?.let { AddTimerWidgetDialog(it) { pinEvent = null } }
+    if (addWidgetOpen) AddWidgetDialog { addWidgetOpen = false }
 
     fun openEditor(e: Event) { editor = e; editorOpen = true }
 
     // Surface (not a bare Box) so text defaults to onBackground instead of black.
+    val batteryRevoked = remember(tick) { Battery.revoked(ctx) }
+    val unconfirmedSince = remember(tick) { ctx.unconfirmedSince }
+    val expired = remember(tick) { ctx.sessionExpired }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Box {
-        HomeScreen(
+        CompositionLocalProvider(LocalUnconfirmed provides (unconfirmedSince != null)) { HomeScreen(
             events = events, now = now, connected = connected, syncing = syncing,
+            expired = expired, unconfirmedSince = unconfirmedSince,
+            batteryRevoked = batteryRevoked,
+            onBatteryFix = { ctx.startActivity(Battery.requestIntent(ctx)) },
+            onBatteryDismiss = { Battery.dismissWarning(ctx); tick++ },
+            onSignIn = { ctx.startActivity(Intent(ctx, LoginActivity::class.java)) },
             onSync = { sync(manual = true) },
             onSettings = { settingsOpen = true },
+            onAddWidget = { addWidgetOpen = true },
             updateReady = updateReady,
             onNew = {
                 // Default: the top of the hour after next, in local time (not UTC, which is off by 30 min in India).
@@ -187,7 +215,7 @@ fun App() {
                 openEditor(Event(name = "", startMillis = start.atZone(zone).toInstant().toEpochMilli()))
             },
             onEdit = ::openEditor,
-        )
+        ) }
 
         // Fade content out under the status bar so the clock and icons stay readable while scrolling.
         Box(
@@ -217,10 +245,13 @@ fun App() {
                         scope.launch(Dispatchers.IO) {
                             // The time or alarm may have changed: drop the old alarms first, rescheduleAll sets the new ones.
                             if (saved.id != 0) Scheduler.cancel(ctx, saved.id)
-                            dao.upsert(saved)
+                            val row = dao.upsert(saved) // the new id for an insert, -1 for an update
                             Scheduler.rescheduleAll(ctx)
+                            // Only new timers ask; an edited one has its own "Add to home screen" button in the editor.
+                            if (saved.id == 0 && row > 0) withContext(Dispatchers.Main) { pinEvent = saved.copy(id = row.toInt()) }
                         }
                     },
+                    onAddToHome = { pinEvent = it },
                     onDelete = if (e.id == 0) null else {
                         {
                             editorOpen = false
@@ -241,10 +272,11 @@ fun App() {
                 connected = connected,
                 lastSync = lastSync,
                 onBack = { settingsOpen = false; tick++ }, // tick: re-read the update badge
+                expired = expired,
                 onConnect = { ctx.startActivity(Intent(ctx, LoginActivity::class.java)) },
                 onDisconnect = {
-                    CookieManager.getInstance().removeAllCookies(null) // so "Connect" asks for a fresh login
-                    scope.launch(Dispatchers.IO) { AmizoneSync.disconnect(ctx); withContext(Dispatchers.Main) { tick++ } }
+                    AmizoneSync.wipeWebView(ctx) // the browser's own cookies, storage and cache (main thread)
+                    scope.launch(Dispatchers.IO) { AmizoneSync.signOut(ctx); withContext(Dispatchers.Main) { tick++ } }
                 },
             )
         }
@@ -254,7 +286,9 @@ fun App() {
 @Composable
 private fun HomeScreen(
     events: List<Event>, now: Long, connected: Boolean, syncing: Boolean, updateReady: Boolean,
-    onSync: () -> Unit, onSettings: () -> Unit, onNew: () -> Unit, onEdit: (Event) -> Unit,
+    expired: Boolean, unconfirmedSince: Long?, onSignIn: () -> Unit,
+    batteryRevoked: Boolean, onBatteryFix: () -> Unit, onBatteryDismiss: () -> Unit,
+    onSync: () -> Unit, onSettings: () -> Unit, onAddWidget: () -> Unit, onNew: () -> Unit, onEdit: (Event) -> Unit,
 ) {
     val upcoming = events.filter { it.startMillis > now }
     val hero = upcoming.firstOrNull()
@@ -303,6 +337,15 @@ private fun HomeScreen(
         ) {
             val full: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
             item(key = "header", span = full) { Header(connected, syncing, updateReady, onSync, onSettings) }
+            item(key = "add-widget", span = full) {
+                AssistChip(onClick = onAddWidget, label = { Text("Add widget to home screen") }, leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp)) })
+            }
+
+            if (batteryRevoked) item(key = "battery", span = full) { BatteryWarning(onBatteryFix, onBatteryDismiss) }
+
+            if (connected && (expired || unconfirmedSince != null)) {
+                item(key = "banner", span = full) { TimetableBanner(expired, unconfirmedSince ?: 0L, onSignIn, onSync) }
+            }
 
             if (hero == null) {
                 item(key = "empty", span = full) { EmptyState() }
@@ -382,6 +425,7 @@ private fun WeekRow(e: Event, modifier: Modifier = Modifier) {
                 Text(e.title(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val room = e.room
                 if (room != null) Text(room, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (LocalUnconfirmed.current) Text("\u26A0 Unconfirmed", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
             }
         }
     }
@@ -504,6 +548,7 @@ private fun HeroCard(e: Event, modifier: Modifier = Modifier, onClick: (() -> Un
                 Pill(start.format(DAY_SHORT), fg)
                 Pill("🕘 " + start.format(TIME) + (e.endMillis?.let { " – " + it.toLocal().format(TIME) } ?: ""), fg)
                 e.room?.let { Pill("📍 $it", fg) }
+                if (e.source == AMIZONE && LocalUnconfirmed.current) Pill("\u26A0 Unconfirmed", fg)
             }
         }
     }
@@ -543,6 +588,7 @@ private fun TimelineRow(e: Event, now: Long, first: Boolean, last: Boolean, modi
                     Text(range, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     e.room?.let { Text("📍 $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     e.faculty?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    if (LocalUnconfirmed.current) Text("\u26A0 Unconfirmed", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary)
                 }
                 Spacer(Modifier.width(8.dp))
                 if (live) {
@@ -571,10 +617,36 @@ internal fun EventCard(e: Event, now: Long, modifier: Modifier = Modifier, onCli
         Spacer(Modifier.height(12.dp))
         Text(e.title().ifBlank { "Event name" }, style = MaterialTheme.typography.titleMedium, color = fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(leftText(left), style = MaterialTheme.typography.headlineSmall, color = fg)
-        Spacer(Modifier.height(12.dp))
-        ProgressVisual(e.styleIndex(), progress(left), fg)
+        if (e.styleIndex() != 3) {
+            Spacer(Modifier.height(12.dp))
+            ProgressVisual(e.styleIndex(), progress(left), fg)
+        }
         Spacer(Modifier.height(12.dp))
         Text(e.subtitle(), style = MaterialTheme.typography.bodySmall, color = fg.copy(alpha = 0.85f), maxLines = 3, overflow = TextOverflow.Ellipsis)
         e.faculty?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = fg.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    }
+}
+
+/** Shown above the timetable when it can't currently be confirmed: sign in again, or just a failed refresh. */
+@Composable
+private fun TimetableBanner(expired: Boolean, since: Long, onSignIn: () -> Unit, onRetry: () -> Unit) {
+    val date = if (since == 0L) "never" else Instant.ofEpochMilli(since).atZone(zone)
+        .format(DateTimeFormatter.ofPattern("d MMM, h:mm a", LocalConfiguration.current.locales[0]))
+    Column(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).background(MaterialTheme.colorScheme.tertiaryContainer).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            if (expired) "Amizone sign-in needed" else "Couldn't refresh your timetable",
+            style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onTertiaryContainer,
+        )
+        Text(
+            if (expired) "Your classes below were last confirmed on $date and may be out of date. Your alarms keep working."
+            else "Showing your classes as last confirmed on $date. Your alarms keep working.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer,
+        )
+        androidx.compose.material3.TextButton(onClick = if (expired) onSignIn else onRetry) {
+            Text(if (expired) "Sign in" else "Try again", color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }

@@ -6,12 +6,12 @@ import org.junit.Test
 class TitleCaseTest {
     @Test
     fun convertsRealCourseNames() {
-        assertEquals("Environmental Studies (VAC -I)", titleCase("ENVIRONMENTAL STUDIES (VAC -I)"))
-        assertEquals("Goal Setting and Time Management-I (VAC-III)", titleCase("GOAL SETTING AND TIME MANAGEMENT-I (VAC-III)"))
-        assertEquals("Orientation Programme in Entrepreneurship", titleCase("ORIENTATION PROGRAMME IN ENTREPRENEURSHIP"))
-        assertEquals("Internet & Web Fundamentals", titleCase("INTERNET & WEB FUNDAMENTALS"))
-        assertEquals("Understanding Self for Effectiveness", titleCase("UNDERSTANDING SELF FOR EFFECTIVENESS"))
-        assertEquals("General Business Communication- Foundation", titleCase("GENERAL BUSINESS COMMUNICATION- FOUNDATION"))
+        assertEquals("Sample Studies (LAB -I)", titleCase("SAMPLE STUDIES (LAB -I)"))
+        assertEquals("Skills and Practice-I (LAB-III)", titleCase("SKILLS AND PRACTICE-I (LAB-III)"))
+        assertEquals("Introduction to Example Methods", titleCase("INTRODUCTION TO EXAMPLE METHODS"))
+        assertEquals("Reading & Writing Basics", titleCase("READING & WRITING BASICS"))
+        assertEquals("Thinking for Effectiveness", titleCase("THINKING FOR EFFECTIVENESS"))
+        assertEquals("General Example Studies- Foundation", titleCase("GENERAL EXAMPLE STUDIES- FOUNDATION"))
     }
 
     @Test

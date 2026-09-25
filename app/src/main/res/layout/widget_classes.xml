@@ -56,13 +56,18 @@
 
         <Chronometer
             android:id="@+id/cchrono"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:fontFamily="sans-serif-medium"
             android:fontFeatureSettings="tnum"
             android:includeFontPadding="false"
             android:textColor="@color/white"
+            android:autoSizeMaxTextSize="32sp"
+            android:autoSizeMinTextSize="14sp"
+            android:autoSizeStepGranularity="1sp"
+            android:autoSizeTextType="uniform"
+            android:maxLines="1"
             android:textSize="32sp"
             android:textStyle="bold" />
 
@@ -256,6 +261,16 @@
             android:id="@+id/cmore"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:paddingStart="6dp"
+            android:textColor="#B0FFFFFF"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/cnote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
             android:fontFamily="sans-serif-medium"
             android:paddingStart="6dp"
             android:textColor="#B0FFFFFF"

@@ -80,7 +80,9 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.work.runtime)
     implementation(libs.okhttp)
+    implementation(libs.androidx.security.crypto)
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp.mockwebserver) // a fake GitHub for the updater tests
     testImplementation(libs.org.json) // real org.json for JVM tests; android.jar only has stubs
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

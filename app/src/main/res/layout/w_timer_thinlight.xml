@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:gravity="center_vertical"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+        android:shadowColor="#E6FFFFFF"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:shadowRadius="4"
+            android:id="@+id/emoji"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="@drawable/widget_badge_light"
+            android:gravity="center"
+            android:textSize="20sp" />
+
+        <TextView
+        android:shadowColor="#E6FFFFFF"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:shadowRadius="4"
+            android:id="@+id/name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-light"
+            android:maxLines="2"
+            android:textColor="@color/white"
+            android:textSize="15sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <Chronometer
+        android:shadowColor="#E6FFFFFF"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:shadowRadius="4"
+            android:id="@+id/chrono"
+            android:layout_width="0dp"
+                android:layout_weight="1"
+            android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-light"
+            android:fontFeatureSettings="tnum"
+            android:includeFontPadding="false"
+            android:textColor="@color/white"
+            android:autoSizeMaxTextSize="37sp"
+                android:autoSizeMinTextSize="14sp"
+                android:autoSizeStepGranularity="1sp"
+                android:autoSizeTextType="uniform"
+                android:maxLines="1"
+                android:textSize="37sp" />
+
+        <ImageView
+            android:id="@+id/progress_ring"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="6dp"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <TextView
+        android:shadowColor="#E6FFFFFF"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:shadowRadius="4"
+        android:id="@+id/room"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif-light"
+        android:maxLines="2"
+        android:textColor="#B0FFFFFF"
+        android:textSize="12sp" />
+
+    <ImageView
+        android:id="@+id/progress_strip"
+        android:layout_width="match_parent"
+        android:layout_height="10dp"
+        android:layout_marginTop="5dp"
+        android:contentDescription="@null"
+        android:scaleType="fitXY"
+        android:visibility="gone" />
+
+    <TextView
+        android:shadowColor="#E6FFFFFF"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:shadowRadius="4"
+        android:id="@+id/empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-light"
+        android:gravity="center"
+        android:text="No upcoming events"
+        android:textColor="@color/white"
+        android:textSize="18sp" />
+
+    <TextView
+        android:shadowColor="#E6FFFFFF"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:shadowRadius="4"
+        android:id="@+id/empty_sub"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="2"
+        android:textColor="#B0FFFFFF"
+        android:textSize="12sp" />
+</LinearLayout>

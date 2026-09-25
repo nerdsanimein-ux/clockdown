@@ -7,9 +7,18 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
+import android.os.Looper
+import android.os.Handler
 import android.webkit.CookieManager
+import android.widget.Toast
+import android.widget.TextView
+import android.widget.LinearLayout
+import android.webkit.WebChromeClient
+import android.webkit.JsResult
+import android.view.View
+import android.webkit.WebResourceRequest
+import android.webkit.WebStorage
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -28,7 +37,6 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
-import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.time.LocalDate
@@ -39,22 +47,29 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 private const val SITE = "https://s.amizone.net"
-private const val EXPIRED_ID = 1_000_000 // event notifications use +id / -id, so this can't collide
+private const val SIGN_IN_ID = 1_000_000 // event notifications use +id / -id, so this can't collide
 private val IST: ZoneId = ZoneId.of("Asia/Kolkata")
 private val TIME = DateTimeFormatter.ofPattern("yyyy/MM/dd hh:mm:ss a", Locale.US)
 
-// Stored in app-private prefs, and excluded from backups (see res/xml/backup_rules.xml).
-// Keys: cookies, ua, lastSync, lastJson, classAlarm, classMinutes.
+// Ordinary app-private preferences (excluded from backups): settings and sync bookkeeping, never credentials.
+// The session itself lives in Session (encrypted). Keys here: lastSync (the last CONFIRMED sync), unconfirmed,
+// sessionExpired, lastJson (debug view), classAlarm, classMinutes, and the update-check state.
 val Context.prefs get() = getSharedPreferences("prefs", Context.MODE_PRIVATE)
-val Context.amizoneConnected get() = prefs.contains("cookies")
+val Context.amizoneConnected get() = Session.active(this)
+
+/** True once a sync has found the session dead: the user has to sign in again. */
+val Context.sessionExpired get() = prefs.getBoolean("sessionExpired", false)
+
+/** When the timetable on screen was last confirmed, if it currently can't be (a sync failed); null when it is up to date. 0 = never. */
+val Context.unconfirmedSince: Long? get() = if (amizoneConnected && prefs.getBoolean("unconfirmed", false)) prefs.getLong("lastSync", 0) else null
 
 /** Lead time for class alarms; 0 when the user turned class alarms off. */
 val Context.classAlarmMinutes get() = if (prefs.getBoolean("classAlarm", true)) prefs.getInt("classMinutes", 10) else 0
 
 enum class SyncResult(val message: String) {
     OK("Synced"),
-    NO_SESSION("Not connected to Amizone"),
-    EXPIRED("Amizone session expired, log in again"),
+    NO_SESSION("Not signed in to Amizone"),
+    EXPIRED("Amizone sign-in needed"),
     FAILED("Sync failed (network, server or format change)"),
 }
 
@@ -80,29 +95,40 @@ fun parseClasses(arr: JSONArray): List<Event> = (0 until arr.length()).map { arr
     )
 }.sortedBy { it.startMillis }
 
+/** What one request to the timetable endpoint returned. Cookies and headers are deliberately not kept. */
+private class Reply(val code: Int, val contentType: String?, val body: String)
+
 object AmizoneSync {
-    // No redirects: a 302 to the login page is one of the ways an expired session shows up.
+    // No redirects: a 302 to the login page is one of the ways an expired session shows up (see SessionCheck).
     private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build()
 
-    /** Blocking; call off the main thread. Synchronized so the worker and the UI never sync at once. */
+    /**
+     * Blocking; call off the main thread. Synchronized so the worker and the UI never sync at once.
+     *
+     * A failed sync never touches the stored timetable or its alarms: what was last confirmed keeps showing, marked
+     * "unconfirmed", and every alarm already scheduled still fires. [force] is for an explicit "Sync now": otherwise a
+     * session already known to be dead is not retried until the user signs in again.
+     */
     @Synchronized
-    fun run(ctx: Context): SyncResult {
+    fun run(ctx: Context, force: Boolean = false): SyncResult {
         val p = ctx.prefs
-        val cookies = p.getString("cookies", null) ?: return SyncResult.NO_SESSION
-        val ua = p.getString("ua", null) ?: WebSettings.getDefaultUserAgent(ctx)
+        val cookies = Session.cookies(ctx) ?: return SyncResult.NO_SESSION
+        if (!force && ctx.sessionExpired) return SyncResult.EXPIRED
+        val ua = Session.userAgent(ctx) ?: WebSettings.getDefaultUserAgent(ctx)
 
         // The endpoint ignores `end` and returns only the `start` day, so fetch each day separately.
         // All days must succeed before anything is changed, so a failure never leaves a half-updated timetable.
         val today = LocalDate.now(IST)
         val rows = mutableListOf<JSONArray>()
-        val log = StringBuilder() // shown in the debug viewer
+        val log = StringBuilder() // shown in the debug viewer: status and body only, never cookies
         for (day in (0L..7L).map { today.plusDays(it) }) {
-            val (code, body) = try { fetchDay(day, cookies, ua) } catch (e: IOException) { return SyncResult.FAILED }
-            log.append("== $day  HTTP $code\n${body.take(30_000)}\n\n")
-            if (code >= 500) return SyncResult.FAILED
-            val arr = try { JSONArray(body) } catch (e: JSONException) { p.edit().putString("lastJson", log.toString()).apply(); return expired(ctx) } // HTML/login page/401/302
-            if (code !in 200..299) { p.edit().putString("lastJson", log.toString()).apply(); return expired(ctx) }
-            rows += arr
+            val r = try { fetchDay(day, cookies, ua) } catch (e: IOException) { return failed(ctx) }
+            log.append("== $day  HTTP ${r.code}\n${r.body.take(30_000)}\n\n")
+            when (SessionCheck.classify(r.code, r.contentType, r.body)) {
+                Verdict.OK -> rows += JSONArray(SessionCheck.trimBody(r.body))
+                Verdict.EXPIRED -> { p.edit().putString("lastJson", log.toString()).apply(); return expired(ctx) }
+                Verdict.PROBLEM -> { p.edit().putString("lastJson", log.toString()).apply(); return failed(ctx) }
+            }
         }
         p.edit().putString("lastJson", log.toString().take(200_000)).apply()
         val end = today.plusDays(8)
@@ -110,19 +136,19 @@ object AmizoneSync {
         val now = System.currentTimeMillis()
         val endMs = end.atStartOfDay(IST).toInstant().toEpochMilli()
         // A row we can't parse must not wipe the timetable: keep old events and report failure.
-        val fresh = try { rows.flatMap { parseClasses(it) } } catch (e: Exception) { return SyncResult.FAILED }
+        val fresh = try { rows.flatMap { parseClasses(it) } } catch (e: Exception) { return failed(ctx) }
             .distinctBy { it.amizoneId }
             .filter { it.startMillis in (now + 1) until endMs }
             .sortedBy { it.startMillis }
 
         AppDb.get(ctx).replaceAmizone(now, endMs, fresh).forEach { Scheduler.cancel(ctx, it) }
-        Scheduler.rescheduleAll(ctx)
-        p.edit().putLong("lastSync", now).apply()
-        ctx.getSystemService(NotificationManager::class.java).cancel(EXPIRED_ID)
+        p.edit().putLong("lastSync", now).putBoolean("unconfirmed", false).putBoolean("sessionExpired", false).apply()
+        Scheduler.rescheduleAll(ctx) // also refreshes the widgets, which drop their "Unconfirmed" note
+        ctx.getSystemService(NotificationManager::class.java).cancel(SIGN_IN_ID)
         return SyncResult.OK
     }
 
-    private fun fetchDay(day: LocalDate, cookies: String, ua: String): Pair<Int, String> {
+    private fun fetchDay(day: LocalDate, cookies: String, ua: String): Reply {
         val url = "$SITE/Calendar/home/GetDiaryEvents".toHttpUrl().newBuilder()
             .addQueryParameter("start", day.toString()).addQueryParameter("end", day.plusDays(1).toString()).build()
         val req = Request.Builder().url(url)
@@ -132,28 +158,49 @@ object AmizoneSync {
             .header("User-Agent", ua)
             .header("Cookie", cookies)
             .build()
-        return client.newCall(req).execute().use { it.code to it.body.string() }
+        return client.newCall(req).execute().use { Reply(it.code, it.header("Content-Type"), it.body.string()) }
     }
 
+    /** The timetable on screen is the last confirmed one; say so, in the app and on the widgets. */
+    private fun markUnconfirmed(ctx: Context) {
+        ctx.prefs.edit().putBoolean("unconfirmed", true).apply()
+        Scheduler.refreshWidget(ctx)
+    }
+
+    private fun failed(ctx: Context): SyncResult { markUnconfirmed(ctx); return SyncResult.FAILED }
+
     private fun expired(ctx: Context): SyncResult {
+        ctx.prefs.edit().putBoolean("sessionExpired", true).apply()
+        markUnconfirmed(ctx)
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel("sync", "Amizone sync", NotificationManager.IMPORTANCE_DEFAULT))
-        nm.notify(EXPIRED_ID, Notification.Builder(ctx, "sync")
+        nm.createNotificationChannel(NotificationChannel("sync", "Amizone sign-in", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.notify(SIGN_IN_ID, Notification.Builder(ctx, "sync")
             .setSmallIcon(android.R.drawable.stat_notify_error)
-            .setContentTitle("Amizone session expired").setContentText("Tap to log in again")
+            .setContentTitle("Amizone sign-in needed").setContentText("Tap to sign in again. Your alarms keep working meanwhile.")
             .setContentIntent(PendingIntent.getActivity(ctx, 1, Intent(ctx, LoginActivity::class.java),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setAutoCancel(true).setOnlyAlertOnce(true).build())
         return SyncResult.EXPIRED
     }
 
-    /** Forget the session and drop all class events. Call off the main thread (the cookie wipe is done by the caller). */
-    fun disconnect(ctx: Context) {
-        ctx.prefs.edit().remove("cookies").remove("ua").remove("lastSync").remove("lastJson").apply()
+    /**
+     * Forget the session and every trace of the account: cookies, the saved timetable and its alarms, the raw-response
+     * log. Call off the main thread; the caller clears the WebView's own cookies and cache (see [wipeWebView]).
+     */
+    fun signOut(ctx: Context) {
+        Session.clear(ctx)
+        ctx.prefs.edit().remove("lastSync").remove("lastJson").remove("unconfirmed").remove("sessionExpired").apply()
         WorkManager.getInstance(ctx).cancelUniqueWork("amizone")
-        ctx.getSystemService(NotificationManager::class.java).cancel(EXPIRED_ID)
+        ctx.getSystemService(NotificationManager::class.java).cancel(SIGN_IN_ID)
         AppDb.get(ctx).deleteAmizone().forEach { Scheduler.cancel(ctx, it) }
         Scheduler.rescheduleAll(ctx)
+    }
+
+    /** Main thread only. Clears the browser's cookies, storage, cache and history so nothing of the login survives. */
+    fun wipeWebView(ctx: Context) {
+        CookieManager.getInstance().apply { removeAllCookies(null); flush() }
+        WebStorage.getInstance().deleteAllData()
+        WebView(ctx).apply { clearCache(true); clearHistory(); clearFormData(); destroy() }
     }
 
     fun schedulePeriodic(ctx: Context) {
@@ -168,37 +215,167 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
         if (AmizoneSync.run(applicationContext) == SyncResult.FAILED) Result.retry() else Result.success()
 }
 
-/** "Connect Amizone": you log in yourself; only the resulting session cookies are kept, never the password. */
+/**
+ * "Sign in to Amizone": the real login page, in a WebView.
+ *
+ * The user solves the captcha (and, the first time, types their details) in the page itself. Two things happen on top:
+ *  - After a SUCCESSFUL sign-in the ID and password are saved, encrypted (see [CredentialStore]), so next time they are
+ *    filled in for you. Details from a failed attempt are never saved.
+ *  - If saved details exist, the page's own Login button is pressed for you, once, and only when the page itself says
+ *    the form is ready: Turnstile has issued its token AND the page has seen a real touch (its own bot check, which we
+ *    do not fake). If anything goes wrong we stop and show the form. It can never retry (see [AutoLogin]).
+ * Nothing is ever logged, and the captcha token is never read, copied, replayed or solved by us.
+ */
 class LoginActivity : ComponentActivity() {
     private var done = false
+    private var failed = false
+    private var prefilled = false
+    private var pollsLeft = MAX_POLLS
+    private var typedId = ""
+    private var typedPassword = ""
+    private lateinit var web: WebView
+    private lateinit var status: TextView
+    private lateinit var auto: AutoLogin
+    private val handler = Handler(Looper.getMainLooper())
 
-    @SuppressLint("SetJavaScriptEnabled")
+    private fun say(text: String?) { status.text = text ?: ""; status.visibility = if (text == null) View.GONE else View.VISIBLE }
+
+    @SuppressLint("SetJavaScriptEnabled") // the login page and its captcha don't work without it
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val web = WebView(this)
-        web.settings.javaScriptEnabled = true
-        web.settings.domStorageEnabled = true
-        ViewCompat.setOnApplyWindowInsetsListener(web) { v, insets ->
+
+        val now = System.currentTimeMillis()
+        val recentlyTried = now - prefs.getLong("autoLoginAt", 0) < COOL_DOWN_MS // e.g. the screen was rotated mid-attempt
+        val saved = CredentialStore.status(this)
+        auto = AutoLogin(saved == CredentialStore.Status.SAVED, saved == CredentialStore.Status.REJECTED, recentlyTried)
+
+        fun label(size: Float, pad: Int) = TextView(this).apply {
+            textSize = size; setPadding(pad, pad / 2, pad, pad / 2); setTextColor(0xFF1B1B1F.toInt()); setBackgroundColor(0xFFF1EFF7.toInt())
+        }
+        val dp = resources.displayMetrics.density
+        val note = label(12.5f, (14 * dp).toInt()).apply {
+            text = "Your Amizone password is stored encrypted on this phone so signing in again is quicker. It is never sent anywhere except Amizone."
+        }
+        status = label(13.5f, (14 * dp).toInt()).apply { setBackgroundColor(0xFFFFE9C7.toInt()); visibility = View.GONE }
+
+        web = WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(note, LinearLayout.LayoutParams(-1, -2))
+            addView(status, LinearLayout.LayoutParams(-1, -2))
+            addView(web, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val b = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
             v.setPadding(b.left, b.top, b.right, b.bottom)
             insets
         }
-        web.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView, url: String) {
-                val u = Uri.parse(url)
-                if (done || u.host != "s.amizone.net" || !u.path.orEmpty().trimEnd('/').equals("/Home", ignoreCase = true)) return
-                val cookies = CookieManager.getInstance().getCookie(SITE) ?: return
-                done = true
-                prefs.edit().putString("cookies", cookies).putString("ua", view.settings.userAgentString)
-                    .putLong("lastSync", 0).apply() // lastSync=0 makes MainActivity sync as soon as it resumes
-                AmizoneSync.schedulePeriodic(applicationContext)
-                startActivity(Intent(this@LoginActivity, MainActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-                finish()
+
+        web.webChromeClient = object : WebChromeClient() {
+            // The page explains itself with alerts ("Please complete the CAPTCHA"); show them instead of swallowing them.
+            override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean {
+                Toast.makeText(this@LoginActivity, message, Toast.LENGTH_LONG).show(); result.confirm(); return true
             }
         }
-        setContentView(web)
+        web.webViewClient = object : WebViewClient() {
+            // Only the portal and its captcha provider may take over the page: no way to be steered to a look-alike site.
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = !LoginDetector.allowedPage(request.url.toString())
+
+            override fun onPageFinished(view: WebView, url: String) {
+                if (done) return
+                val cookies = CookieManager.getInstance().getCookie(SITE)
+                if (LoginDetector.signedIn(url, cookies)) { signedIn(view, cookies!!); return }
+                if (isLoginPage(url)) {
+                    if (auto.failedAfterSubmit()) return failAfterSubmit() // we submitted and Amizone sent us back here
+                    startPolling()
+                }
+            }
+        }
+        setContentView(root)
         web.loadUrl(SITE)
+    }
+
+    private fun isLoginPage(url: String): Boolean {
+        val u = try { java.net.URI(url) } catch (e: Exception) { return false }
+        return u.host == "s.amizone.net" && u.path.orEmpty().trimEnd('/').isEmpty()
+    }
+
+    private fun signedIn(view: WebView, cookies: String) {
+        done = true
+        handler.removeCallbacksAndMessages(null)
+        Session.save(applicationContext, cookies, view.settings.userAgentString)
+        // Save the details only now that they are known to be right. Whatever was typed for a failed attempt is dropped.
+        if (typedId.isNotBlank() && typedPassword.isNotEmpty()) CredentialStore.save(applicationContext, typedId, typedPassword)
+        typedId = ""; typedPassword = ""
+        AmizoneSync.schedulePeriodic(applicationContext)
+        // The app opens and syncs at once; lastSync is kept so "last confirmed" stays truthful until it succeeds.
+        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        finish()
+    }
+
+    /** Amizone sent us back to the login page after our one automatic attempt: stop for good and let the user type. */
+    private fun failAfterSubmit() {
+        failed = true
+        handler.removeCallbacksAndMessages(null)
+        CredentialStore.markRejected(applicationContext)
+        say("Your saved login didn't work, so it won't be tried again. Please type your Amizone ID and password. (If you changed your password, this fixes it.)")
+    }
+
+    private fun startPolling() {
+        handler.removeCallbacksAndMessages(null)
+        pollsLeft = MAX_POLLS
+        poll()
+    }
+
+    private fun poll() {
+        if (done || failed || pollsLeft-- <= 0) return
+        web.evaluateJavascript(LoginScripts.READ_STATE) { raw ->
+            if (done || failed) return@evaluateJavascript
+            val state = LoginScripts.parseState(raw, onLoginPage = true)
+            if (state != null && state.fieldsFound) onState(state)
+            handler.postDelayed({ poll() }, POLL_MS)
+        }
+    }
+
+    private fun onState(s: LoginPageState) {
+        // Remember what is typed (memory only), to save it if the sign-in turns out to succeed.
+        if (s.typedId.isNotEmpty() && s.typedPassword.isNotEmpty()) { typedId = s.typedId; typedPassword = s.typedPassword }
+
+        val saved = if (auto.allowed || CredentialStore.status(this) == CredentialStore.Status.SAVED) CredentialStore.get(this) else null
+        if (!prefilled && saved != null && s.idEmpty && s.passwordEmpty && !auto.submitted) {
+            prefilled = true
+            web.evaluateJavascript(LoginScripts.prefill(saved.first, saved.second), null)
+            say("Your saved login is filled in. Complete the captcha if it asks, then touch the screen to sign in.")
+        }
+        if (CredentialStore.status(this) == CredentialStore.Status.REJECTED && !failed && !auto.submitted) {
+            say("Your saved login was refused earlier, so it isn't filled in. Please type your Amizone ID and password.")
+        }
+
+        if (auto.decide(s) == AutoStep.SUBMIT) {
+            auto.markSubmitted() // exactly once per login screen, no matter what happens next
+            prefs.edit().putLong("autoLoginAt", System.currentTimeMillis()).apply()
+            say("Signing in…")
+            web.evaluateJavascript(LoginScripts.CLICK_LOGIN, null)
+            // If nothing happens (the page's own check said no), don't leave the user waiting; and never press it again.
+            handler.postDelayed({
+                if (!done && !failed) say("Couldn't sign in automatically. Please tap Login yourself.")
+            }, WATCHDOG_MS)
+        }
+    }
+
+    override fun onDestroy() { handler.removeCallbacksAndMessages(null); super.onDestroy() }
+
+    private companion object {
+        const val POLL_MS = 500L
+        const val MAX_POLLS = 240              // two minutes of watching the page, then leave it to the user
+        const val WATCHDOG_MS = 20_000L
+        const val COOL_DOWN_MS = 2 * 60_000L   // a new login screen within this long of an automatic attempt won't auto-submit
     }
 }

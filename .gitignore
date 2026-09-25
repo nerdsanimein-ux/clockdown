@@ -10,6 +10,8 @@ local.properties
 *.pem
 secrets.*
 credentials.*
+# Our own source file (the store for saved logins), not a secrets file:
+!app/src/**/Credentials.kt
 google-services.json
 
 # --- Build output and tooling ---

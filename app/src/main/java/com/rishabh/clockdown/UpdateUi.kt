@@ -61,10 +61,12 @@ fun UpdatesGroup() {
     var dialogFor by remember { mutableStateOf<UpdateInfo?>(null) }
     val update = remember(tick) { UpdateChecker.available(ctx) }
 
-    fun check() {
+    // revalidate = true when a cached update is about to be offered: ask GitHub first, so a release that has since
+    // been deleted is never offered (and its badge goes away).
+    fun check(revalidate: Boolean = false) {
         checking = true; message = null
         scope.launch {
-            val r = withContext(Dispatchers.IO) { UpdateChecker.check(ctx, manual = true) }
+            val r = withContext(Dispatchers.IO) { UpdateChecker.check(ctx, if (revalidate) CheckMode.REVALIDATE else CheckMode.MANUAL) }
             checking = false; tick++
             when (r) {
                 CheckResult.UPDATE -> dialogFor = UpdateChecker.available(ctx)
@@ -82,7 +84,7 @@ fun UpdatesGroup() {
         }
         Row(
             Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
-                .clickable(enabled = !checking) { if (update != null) dialogFor = update else check() }
+                .clickable(enabled = !checking) { check(revalidate = update != null) }
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -133,6 +135,11 @@ fun UpdateDialog(info: UpdateInfo, onClose: () -> Unit) {
                 is Download.Done -> { ApkInstaller.install(ctx, r.file); onClose() }
                 Download.NoInternet -> phase = Phase.Problem("Couldn't reach the internet. Please check your connection and try again.")
                 Download.Interrupted -> phase = Phase.Problem("The download stopped before it finished. Please try again.")
+                Download.Gone -> {
+                    // The release was withdrawn after we last looked. Forget it so the badge goes away too.
+                    UpdateChecker.forget(ctx)
+                    phase = Phase.Problem("This update isn't available any more, so there's nothing to install. You're on the latest version.")
+                }
                 Download.Corrupt -> phase = Phase.Problem("The downloaded file looks damaged. Please try again.")
                 Download.WrongPublisher -> phase = Phase.Problem("This update can't be installed over the version you have. Please download the latest Clockdown from its download page instead.")
                 Download.Invalid -> phase = Phase.Problem("This update doesn't match your app, so it wasn't installed.")

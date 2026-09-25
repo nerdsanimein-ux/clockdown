@@ -41,6 +41,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -69,7 +70,7 @@ import java.time.format.FormatStyle
 
 /** Full-screen add/edit: a live preview of the card on top, the essentials next, then everything that changes its look. */
 @Composable
-fun EditScreen(event: Event, onClose: () -> Unit, onSave: (Event) -> Unit, onDelete: (() -> Unit)?) {
+fun EditScreen(event: Event, onClose: () -> Unit, onSave: (Event) -> Unit, onDelete: (() -> Unit)?, onAddToHome: ((Event) -> Unit)? = null) {
     val ctx = LocalContext.current
     BackHandler(onBack = onClose)
 
@@ -79,11 +80,13 @@ fun EditScreen(event: Event, onClose: () -> Unit, onSave: (Event) -> Unit, onDel
     var style by remember { mutableIntStateOf(if (event.id == 0) 0 else event.styleIndex()) }
     var start by remember { mutableStateOf(event.startMillis.toLocal()) }
     var alarm by remember { mutableStateOf(event.alarmMinutes.toString()) }
+    var widget by remember { mutableStateOf(WidgetStyle.of(event.widgetStyle) ?: WidgetStyle.CARD) }
+    var backdrop by remember { mutableStateOf(Backdrop.DARK) }
 
     val millis = start.atZone(zone).toInstant().toEpochMilli()
     val inFuture = millis > System.currentTimeMillis()
     val preview = event.copy(
-        name = name, startMillis = millis, emoji = emoji, colorIdx = color, progressStyle = style,
+        name = name, startMillis = millis, emoji = emoji, colorIdx = color, progressStyle = style, widgetStyle = widget.id,
         alarmMinutes = alarm.toIntOrNull() ?: 0,
     )
 
@@ -189,9 +192,17 @@ fun EditScreen(event: Event, onClose: () -> Unit, onSave: (Event) -> Unit, onDel
                 }
             }
 
+            Section("Widget style") {
+                BackdropChooser(backdrop) { backdrop = it }
+                val now = System.currentTimeMillis()
+                StylePicker(widget, { it?.let { s -> widget = s } }, backdrop) { c, st, light -> Widgets.timerView(c, preview, st, now, null, light) }
+                Text(widget.blurb, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                onAddToHome?.takeIf { event.id != 0 }?.let { OutlinedButton(onClick = { it(event.copy(name = name.trim())) }) { Text("Add to home screen") } }
+            }
+
             Section("Progress style") {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    listOf("Ring", "Dots", "Bars").forEachIndexed { i, label ->
+                    listOf("Ring", "Dots", "Bars", "None").forEachIndexed { i, label ->
                         StyleTile(label, i, selected = style == i, color = paletteColor(color), modifier = Modifier.weight(1f)) { style = i }
                     }
                 }
@@ -230,7 +241,8 @@ private fun StyleTile(label: String, style: Int, selected: Boolean, color: Color
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(Modifier.height(48.dp), contentAlignment = Alignment.Center) {
-            ProgressVisual(style, 0.6f, fg, if (style == 0) Modifier.size(44.dp) else Modifier)
+            if (style == 3) Text("Off", style = MaterialTheme.typography.titleMedium, color = fg)
+            else ProgressVisual(style, 0.6f, fg, if (style == 0) Modifier.size(44.dp) else Modifier)
         }
         Spacer(Modifier.height(8.dp))
         Text(label, style = MaterialTheme.typography.labelLarge, color = fg)
