@@ -205,13 +205,13 @@ object Widgets {
         val v = RemoteViews(ctx.packageName, Looks.layout(Kind.TIMER, look.variant))
         if (click != null) v.setOnClickPendingIntent(R.id.root, click)
         // Card-like styles use the standard dark card here; the see-through ones stay see-through.
-        v.bg(R.id.root, if (look.cardBg == 0 || style == WidgetStyle.OUTLINE) look.cardBg.takeIf { it != 0 } ?: 0 else emptyBg(style))
+        v.bg(R.id.root, if (look.cardBg == 0) 0 else emptyBg(style))
         for (view in listOf(R.id.emoji, R.id.name, R.id.chrono, R.id.room, R.id.progress_ring, R.id.progress_strip)) v.setViewVisibility(view, View.GONE)
         v.setViewVisibility(R.id.empty, View.VISIBLE)
         v.setViewVisibility(R.id.empty_sub, vis(sub.isNotEmpty()))
         v.setTextViewText(R.id.empty, message)
         v.setTextViewText(R.id.empty_sub, sub)
-        val fg = if (style == WidgetStyle.CARD || style == WidgetStyle.GRADIENT) Color.WHITE else look.fg
+        val fg = if (style == WidgetStyle.CARD) Color.WHITE else look.fg
         v.setTextColor(R.id.empty, fg)
         v.setTextColor(R.id.empty_sub, soft(fg))
         return v

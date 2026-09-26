@@ -19,8 +19,8 @@ object WidgetProgress {
 
     /** A soft outline for the see-through styles, so the shapes stay visible over any wallpaper. Null = none needed. */
     fun halo(variant: Variant): Int? = when (variant) {
-        Variant.GLASS, Variant.THIN -> 0xB3000000.toInt() // white shapes get a dark halo
-        Variant.LIGHTGLASS, Variant.THINLIGHT -> 0xE6FFFFFF.toInt() // dark shapes get a pale one
+        Variant.GLASS -> 0xB3000000.toInt() // white shapes get a dark halo
+        Variant.LIGHTGLASS -> 0xE6FFFFFF.toInt() // dark shapes get a pale one
         else -> null
     }
 

@@ -12,7 +12,7 @@ class WidgetStyleTest {
     @Test
     fun aWidgetsOwnStyleBeatsEverything() {
         val e = own.copy(widgetStyle = WidgetStyle.BOLD.id)
-        assertEquals(WidgetStyle.MONO, resolveStyle(WidgetStyle.MONO, e, WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.GLASS, resolveStyle(WidgetStyle.GLASS, e, WidgetStyle.PAPER))
     }
 
     @Test
@@ -32,6 +32,16 @@ class WidgetStyleTest {
     fun anUnknownStyleIdFallsBack() {
         assertNull(WidgetStyle.of("nope"))
         assertEquals(WidgetStyle.CARD, resolveStyle(null, own.copy(widgetStyle = "from-a-newer-version"), WidgetStyle.GLASS))
+    }
+
+    @Test
+    fun retiredStyleIdsMigrateToTheClosestKeptStyle() {
+        // v1.1 dropped these three; anything already saved with one of these ids must keep resolving, not go blank.
+        assertEquals(WidgetStyle.CARD, WidgetStyle.of("gradient"))
+        assertEquals(WidgetStyle.GLASS, WidgetStyle.of("mono"))
+        assertEquals(WidgetStyle.GLASS, WidgetStyle.of("outline"))
+        assertEquals(WidgetStyle.CARD, resolveStyle(WidgetStyle.of("gradient"), own, WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.GLASS, resolveStyle(null, own.copy(widgetStyle = "outline"), WidgetStyle.GLASS))
     }
 
     @Test

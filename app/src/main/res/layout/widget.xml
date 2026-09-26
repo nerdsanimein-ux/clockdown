@@ -12,7 +12,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:visibility="gone">
 
         <TextView
             android:id="@+id/emoji"
@@ -41,7 +42,8 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="2dp"
         android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:visibility="gone">
 
         <Chronometer
             android:id="@+id/chrono"
@@ -80,7 +82,8 @@
         android:maxLines="2"
         android:textColor="#B0FFFFFF"
         android:textSize="12sp"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        android:visibility="gone" />
 
     <ImageView
         android:id="@+id/progress_strip"
@@ -91,13 +94,16 @@
         android:scaleType="fitXY"
         android:visibility="gone" />
 
+    <!-- Shown until the system runs the configure Activity (see android:configure in widget_info.xml) and it saves a
+         choice. A launcher that skips that step (some do for pinned widgets) leaves this on screen, tappable, instead
+         of a blank card: Widgets.timer() wires the same click target once it can. -->
     <TextView
         android:id="@+id/empty"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:fontFamily="sans-serif-medium"
         android:gravity="center"
-        android:text="No upcoming events"
+        android:text="Choose a timer"
         android:textColor="@color/white"
         android:textSize="18sp"
         android:textStyle="bold" />
@@ -110,6 +116,7 @@
         android:ellipsize="end"
         android:gravity="center"
         android:maxLines="2"
+        android:text="Tap to pick what this widget shows"
         android:textColor="#B0FFFFFF"
         android:textSize="12sp" />
 </LinearLayout>

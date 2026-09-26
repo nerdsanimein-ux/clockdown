@@ -12,10 +12,6 @@ val WIDGET_BGS = intArrayOf(
     R.drawable.widget_bg_0, R.drawable.widget_bg_1, R.drawable.widget_bg_2, R.drawable.widget_bg_3,
     R.drawable.widget_bg_4, R.drawable.widget_bg_5, R.drawable.widget_bg_6, R.drawable.widget_bg_7,
 )
-val WIDGET_GRADS = IntArray(8) { arrayOf(R.drawable.widget_grad_0, R.drawable.widget_grad_1, R.drawable.widget_grad_2, R.drawable.widget_grad_3,
-    R.drawable.widget_grad_4, R.drawable.widget_grad_5, R.drawable.widget_grad_6, R.drawable.widget_grad_7)[it] }
-val WIDGET_OUTLINES = IntArray(8) { arrayOf(R.drawable.widget_outline_0, R.drawable.widget_outline_1, R.drawable.widget_outline_2, R.drawable.widget_outline_3,
-    R.drawable.widget_outline_4, R.drawable.widget_outline_5, R.drawable.widget_outline_6, R.drawable.widget_outline_7)[it] }
 val PALETTE_SIZE get() = CARD_COLORS.size
 
 private const val HOUR = 3_600_000L

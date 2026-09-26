@@ -68,16 +68,17 @@ class WidgetConfigActivity : ComponentActivity() {
     }
 
     private fun save(value: String?, name: String?, style: WidgetStyle?) {
-        if (value != null) WidgetPrefs.set(this, widgetId, value, name)
+        // Only touch "what to show" when it actually changed, so restyling an already-configured widget doesn't
+        // wipe its remembered name (used once the timer finishes or is deleted).
+        if (value != null && value != WidgetPrefs.get(this, widgetId)) WidgetPrefs.set(this, widgetId, value, name)
         WidgetPrefs.setStyle(this, widgetId, style)
-        // Draw the widget before reporting success, so it never shows a stale or empty layout after placement.
-        thread {
-            Scheduler.refreshWidget(applicationContext)
-            runOnUiThread {
-                setResult(Activity.RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId))
-                finish()
-            }
-        }
+        // Close the screen right away: waiting on the widget to redraw before returning a result made the whole
+        // screen hang if that redraw was ever slow (it shares a widget host round-trip with the home screen).
+        // The redraw itself still happens, just after, off the UI thread; for a brand-new widget the system also
+        // calls onUpdate() once RESULT_OK is returned, so it never depends on this thread alone.
+        setResult(Activity.RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId))
+        finish()
+        thread { Scheduler.refreshWidget(applicationContext) }
     }
 }
 

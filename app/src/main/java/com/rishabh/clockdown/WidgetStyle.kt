@@ -14,20 +14,21 @@ import androidx.core.graphics.ColorUtils
  */
 enum class WidgetStyle(val id: String, val label: String, val blurb: String) {
     CARD("card", "Card", "A solid coloured card"),
-    GRADIENT("gradient", "Gradient", "A card that fades into a deeper shade"),
     BOLD("bold", "Bold", "Huge numbers on solid black"),
     GLASS("glass", "Glass", "No background. White text on dark wallpapers, dark text on light ones"),
-    MONO("mono", "Mono", "No background, thin single-colour type that adapts to your wallpaper"),
-    PAPER("paper", "Paper", "A warm paper card with dark text"),
-    OUTLINE("outline", "Outline", "A see-through card with a coloured edge");
+    PAPER("paper", "Paper", "A warm paper card with dark text");
 
     companion object {
-        fun of(id: String?): WidgetStyle? = entries.firstOrNull { it.id == id }
+        // v1.1 dropped Gradient (too close to Card), and Mono and Outline (both too close to Glass).
+        // Ids already saved on a device or a friend's must keep resolving, to the closest style that's left.
+        private val RETIRED = mapOf("gradient" to CARD, "mono" to GLASS, "outline" to GLASS)
+
+        fun of(id: String?): WidgetStyle? = if (id == null) null else entries.firstOrNull { it.id == id } ?: RETIRED[id]
     }
 }
 
 /** The text treatments a layout can have. RemoteViews can't change fonts or shadows, so each is its own layout. */
-enum class Variant { PLAIN, GLASS, LIGHTGLASS, THIN, THINLIGHT, HEAVY }
+enum class Variant { PLAIN, GLASS, LIGHTGLASS, HEAVY }
 
 enum class Kind { TIMER, CLASSES, LIST }
 
@@ -76,44 +77,34 @@ object Looks {
                 val fg = onColor(card)
                 Look(style, Variant.PLAIN, WIDGET_BGS[accent], R.drawable.widget_bg, { WIDGET_BGS[it] }, fg, soft(fg), Color.WHITE, fg == Color.WHITE, 1f)
             }
-            WidgetStyle.GRADIENT -> {
-                val fg = onColor(card) // the gradient fades toward a deeper (light text) or paler (dark text) shade, so this reads across all of it
-                Look(style, Variant.PLAIN, WIDGET_GRADS[accent], R.drawable.widget_bg, { WIDGET_GRADS[it] }, fg, soft(fg), Color.WHITE, fg == Color.WHITE, 1f)
-            }
             WidgetStyle.BOLD ->
                 Look(style, Variant.HEAVY, R.drawable.widget_black, R.drawable.widget_black, { R.drawable.widget_black_row }, Color.WHITE, soft(Color.WHITE), Color.WHITE, true, 1.35f)
             WidgetStyle.GLASS ->
                 if (lightWallpaper) Look(style, Variant.LIGHTGLASS, 0, 0, { 0 }, INK, soft(INK), INK, false, 1f)
                 else Look(style, Variant.GLASS, 0, 0, { 0 }, Color.WHITE, soft(Color.WHITE), Color.WHITE, true, 1f)
-            WidgetStyle.MONO ->
-                if (lightWallpaper) Look(style, Variant.THINLIGHT, 0, 0, { 0 }, INK, soft(INK), INK, false, 1.1f)
-                else Look(style, Variant.THIN, 0, 0, { 0 }, Color.WHITE, soft(Color.WHITE), Color.WHITE, true, 1.1f)
             WidgetStyle.PAPER ->
                 Look(style, Variant.PLAIN, R.drawable.widget_paper, R.drawable.widget_paper, { R.drawable.widget_paper_row }, PAPER_INK, soft(PAPER_INK), PAPER_INK, false, 1f)
-            WidgetStyle.OUTLINE ->
-                Look(style, Variant.GLASS, WIDGET_OUTLINES[accent], 0, { WIDGET_OUTLINES[it] }, Color.WHITE, soft(Color.WHITE), Color.WHITE, true, 1f)
         }
     }
 
-    /** Text colour for one row of a list widget: Card and Gradient rows have their own colours, the rest share the container's. */
+    /** Text colour for one row of a list widget: Card rows have their own colour, the rest share the container's. */
     fun rowFg(ctx: Context, style: WidgetStyle, accent: Int, lightWallpaper: Boolean): Int = when (style) {
         WidgetStyle.CARD -> onColor(cardColor(ctx, accent))
-        WidgetStyle.GRADIENT -> onColor(cardColor(ctx, accent))
         else -> of(ctx, style, accent, lightWallpaper).containerFg
     }
 
     fun layout(kind: Kind, variant: Variant): Int = when (kind) {
         Kind.TIMER -> when (variant) {
             Variant.PLAIN -> R.layout.widget; Variant.GLASS -> R.layout.w_timer_glass; Variant.LIGHTGLASS -> R.layout.w_timer_lightglass
-            Variant.THIN -> R.layout.w_timer_thin; Variant.THINLIGHT -> R.layout.w_timer_thinlight; Variant.HEAVY -> R.layout.w_timer_heavy
+            Variant.HEAVY -> R.layout.w_timer_heavy
         }
         Kind.CLASSES -> when (variant) {
             Variant.PLAIN -> R.layout.widget_classes; Variant.GLASS -> R.layout.w_classes_glass; Variant.LIGHTGLASS -> R.layout.w_classes_lightglass
-            Variant.THIN -> R.layout.w_classes_thin; Variant.THINLIGHT -> R.layout.w_classes_thinlight; Variant.HEAVY -> R.layout.w_classes_heavy
+            Variant.HEAVY -> R.layout.w_classes_heavy
         }
         Kind.LIST -> when (variant) {
             Variant.PLAIN -> R.layout.widget_timers; Variant.GLASS -> R.layout.w_list_glass; Variant.LIGHTGLASS -> R.layout.w_list_lightglass
-            Variant.THIN -> R.layout.w_list_thin; Variant.THINLIGHT -> R.layout.w_list_thinlight; Variant.HEAVY -> R.layout.w_list_heavy
+            Variant.HEAVY -> R.layout.w_list_heavy
         }
     }
 }

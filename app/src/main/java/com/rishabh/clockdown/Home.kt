@@ -516,17 +516,21 @@ private fun Pill(text: String, fg: Color, modifier: Modifier = Modifier) {
     )
 }
 
+/** Ticks once a second, aligned to whole seconds so digits flip exactly when the clock does. Read only where the
+ *  second actually matters (the countdown, the progress ring) so the rest of a card doesn't recompose with it. */
+@Composable
+private fun tickingNow(): Long {
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) { delay(1000 - System.currentTimeMillis() % 1000); value = System.currentTimeMillis() }
+    }
+    return now
+}
+
 /** The next event, big: a live countdown that ticks every second, and a wavy progress ring. */
 @Composable
 private fun HeroCard(e: Event, modifier: Modifier = Modifier, onClick: (() -> Unit)?) {
     val bg = paletteColor(e.colorIndex())
     val fg = Color(onColor(bg.toArgb()))
-    // Aligned to whole seconds so the digits flip exactly when the clock does.
-    val now by produceState(System.currentTimeMillis()) {
-        while (true) { delay(1000 - System.currentTimeMillis() % 1000); value = System.currentTimeMillis() }
-    }
-    val left = e.startMillis - now
-    val p = progress(left)
 
     Box(modifier.bouncy(onClick).fillMaxWidth().clip(MaterialTheme.shapes.extraLarge).background(bg)) {
         // A huge, faint copy of the emoji as a watermark.
@@ -543,17 +547,10 @@ private fun HeroCard(e: Event, modifier: Modifier = Modifier, onClick: (() -> Un
                     Text(e.title(), style = MaterialTheme.typography.titleLarge, color = fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.width(8.dp))
-                Box(contentAlignment = Alignment.Center) {
-                    CircularWavyProgressIndicator(
-                        progress = { p }, color = fg, trackColor = fg.copy(alpha = 0.25f), modifier = Modifier.size(76.dp),
-                        stroke = Stroke(width = with(LocalDensity.current) { 7.dp.toPx() }, cap = StrokeCap.Round),
-                        trackStroke = Stroke(width = with(LocalDensity.current) { 7.dp.toPx() }, cap = StrokeCap.Round),
-                    )
-                    Text("${(p * 100).roundToInt()}%", style = MaterialTheme.typography.labelLarge, color = fg)
-                }
+                HeroProgress(e.startMillis, fg)
             }
             Spacer(Modifier.height(18.dp))
-            Countdown(left, fg, if (left >= 24 * 3_600_000L) 44.sp else 58.sp)
+            HeroCountdown(e.startMillis, fg)
             Spacer(Modifier.height(14.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val start = e.startMillis.toLocal()
@@ -564,6 +561,25 @@ private fun HeroCard(e: Event, modifier: Modifier = Modifier, onClick: (() -> Un
             }
         }
     }
+}
+
+@Composable
+private fun HeroProgress(startMillis: Long, fg: Color) {
+    val p = progress(startMillis - tickingNow())
+    Box(contentAlignment = Alignment.Center) {
+        CircularWavyProgressIndicator(
+            progress = { p }, color = fg, trackColor = fg.copy(alpha = 0.25f), modifier = Modifier.size(76.dp),
+            stroke = Stroke(width = with(LocalDensity.current) { 7.dp.toPx() }, cap = StrokeCap.Round),
+            trackStroke = Stroke(width = with(LocalDensity.current) { 7.dp.toPx() }, cap = StrokeCap.Round),
+        )
+        Text("${(p * 100).roundToInt()}%", style = MaterialTheme.typography.labelLarge, color = fg)
+    }
+}
+
+@Composable
+private fun HeroCountdown(startMillis: Long, fg: Color) {
+    val left = startMillis - tickingNow()
+    Countdown(left, fg, if (left >= 24 * 3_600_000L) 44.sp else 58.sp)
 }
 
 /** Timeline entry: time, a rail with a dot, and the class card. */
