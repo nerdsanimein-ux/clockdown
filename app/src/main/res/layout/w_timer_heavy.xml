@@ -30,7 +30,7 @@
             android:layout_weight="1"
             android:ellipsize="end"
             android:fontFamily="sans-serif-black"
-            android:maxLines="1"
+            android:maxLines="2"
             android:textColor="@color/white"
             android:textSize="15sp" />
     </LinearLayout>
@@ -51,12 +51,12 @@
             android:fontFeatureSettings="tnum"
             android:includeFontPadding="false"
             android:textColor="@color/white"
-            android:autoSizeMaxTextSize="38sp"
+            android:autoSizeMaxTextSize="34sp"
                 android:autoSizeMinTextSize="14sp"
                 android:autoSizeStepGranularity="1sp"
                 android:autoSizeTextType="uniform"
                 android:maxLines="1"
-                android:textSize="38sp" />
+                android:textSize="34sp" />
 
         <ImageView
             android:id="@+id/progress_ring"

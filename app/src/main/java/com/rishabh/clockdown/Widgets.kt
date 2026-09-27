@@ -20,6 +20,9 @@ import java.util.Locale
 
 private const val DAY_MS = 24 * 60 * 60 * 1000L
 
+/** Carried by a Timer widget's own click, so MainActivity opens that one timer's editor straight away. */
+const val EXTRA_EDIT_EVENT = "editEventId"
+
 /** Timer widget: one timer or class you choose (or a dynamic "next"). Reconfigurable from the launcher. */
 class ClockdownWidget : AppWidgetProvider() {
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) = async { Scheduler.refreshWidget(ctx) }
@@ -154,6 +157,13 @@ object Widgets {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
+    /** Opens this timer's own editor, where its look, colour and everything else about it lives. */
+    private fun editEvent(ctx: Context, eventId: Int) = PendingIntent.getActivity(
+        ctx, -eventId, // negative: AlarmReceiver's PendingIntents already use the positive event id as their request code
+        Intent(ctx, MainActivity::class.java).setData(Uri.parse("clockdown://edit/$eventId")).putExtra(EXTRA_EDIT_EVENT, eventId),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
     // ---------------------------------------------------------------- Timer widget
 
     /** One event in one style. The real widget, the in-app style previews and the widget picker all use this. */
@@ -165,7 +175,8 @@ object Widgets {
         val v = RemoteViews(ctx.packageName, Looks.layout(Kind.TIMER, look.variant))
         if (click != null) v.setOnClickPendingIntent(R.id.root, click)
         v.bg(R.id.root, look.cardBg)
-        for (view in listOf(R.id.emoji, R.id.name, R.id.chrono)) v.setViewVisibility(view, View.VISIBLE)
+        // top_row/chrono_row only exist in the PLAIN layout (Card/Paper); RemoteViews ignores ids a layout doesn't have.
+        for (view in listOf(R.id.top_row, R.id.chrono_row, R.id.emoji, R.id.name, R.id.chrono)) v.setViewVisibility(view, View.VISIBLE)
         v.setViewVisibility(R.id.empty, View.GONE)
         v.setViewVisibility(R.id.empty_sub, View.GONE)
         v.badge(R.id.emoji, look.lightBadge)
@@ -206,7 +217,7 @@ object Widgets {
         if (click != null) v.setOnClickPendingIntent(R.id.root, click)
         // Card-like styles use the standard dark card here; the see-through ones stay see-through.
         v.bg(R.id.root, if (look.cardBg == 0) 0 else emptyBg(style))
-        for (view in listOf(R.id.emoji, R.id.name, R.id.chrono, R.id.room, R.id.progress_ring, R.id.progress_strip)) v.setViewVisibility(view, View.GONE)
+        for (view in listOf(R.id.top_row, R.id.chrono_row, R.id.emoji, R.id.name, R.id.chrono, R.id.room, R.id.progress_ring, R.id.progress_strip)) v.setViewVisibility(view, View.GONE)
         v.setViewVisibility(R.id.empty, View.VISIBLE)
         v.setViewVisibility(R.id.empty_sub, vis(sub.isNotEmpty()))
         v.setTextViewText(R.id.empty, message)
@@ -224,7 +235,6 @@ object Widgets {
     }
 
     fun timer(ctx: Context, id: Int, upcoming: List<Event>, now: Long): RemoteViews {
-        val override = WidgetPrefs.style(ctx, id)
         var saved = WidgetPrefs.get(ctx, id)
         if (saved == null && id != PREVIEW_ID) {
             // A timer that was just saved on a launcher that can't add widgets for us: use it, so nothing has to be chosen.
@@ -236,7 +246,7 @@ object Widgets {
         if (saved == null && id != PREVIEW_ID) {
             // Not configured yet. Launchers don't always open the configuration screen (pinned widgets often skip it),
             // so instead of guessing, ask, and open the chooser when tapped.
-            return emptyTimer(ctx, override ?: WidgetStyle.CARD, "Choose a timer", "Tap to pick what this widget shows", configure(ctx, id))
+            return emptyTimer(ctx, WidgetStyle.CARD, "Choose a timer", "Tap to pick what this widget shows", configure(ctx, id))
         }
         val cfg = saved ?: WidgetPrefs.TIMER_ANY
         var e: Event? = null
@@ -257,11 +267,17 @@ object Widgets {
             }
             else -> e = upcoming.firstOrNull()
         }
-        val click = if (pick) configure(ctx, id) else Scheduler.openApp(ctx)
-        if (e == null) return emptyTimer(ctx, override ?: WidgetStyle.CARD, message, sub, click)
+        // A live timer opens straight into its own editor (that's where its style lives now); a class has no editor
+        // of its own, so it falls back to just opening the app, same as before.
+        val click = when {
+            pick -> configure(ctx, id)
+            e != null && e.source == MANUAL -> editEvent(ctx, e.id)
+            else -> Scheduler.openApp(ctx)
+        }
+        if (e == null) return emptyTimer(ctx, WidgetStyle.CARD, message, sub, click)
         // The strip is drawn to the widget's width so dots and bars aren't stretched (less the widget's own padding).
         val width = if (id == PREVIEW_ID) 0 else AppWidgetManager.getInstance(ctx).getAppWidgetOptions(id).getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
-        return timerView(ctx, e, resolveStyle(override, e, Defaults.classStyle), now, click, stripDp = if (width > 0) (width - 24).coerceIn(100, 400) else 150)
+        return timerView(ctx, e, resolveStyle(e, Defaults.classStyle), now, click, stripDp = if (width > 0) (width - 24).coerceIn(100, 400) else 150)
     }
 
     // ---------------------------------------------------------------- Classes widget

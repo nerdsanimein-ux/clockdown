@@ -135,8 +135,13 @@ internal fun Event.subtitle(): String {
     return "${start.format(DAY_SHORT)} · $time$extra"
 }
 
+/**
+ * [editEventId]: a Timer widget's own click landed us straight on that timer's editor.
+ * [bindWidgetId]: "Create new timer" was tapped from an empty Timer widget; saving the new timer binds it to that
+ * exact widget instead of asking "add to home screen?" (it's already going there).
+ */
 @Composable
-fun App() {
+fun App(editEventId: Int? = null, bindWidgetId: Int? = null) {
     val ctx = LocalContext.current
     val dao = remember { AppDb.get(ctx) }
     val scope = rememberCoroutineScope()
@@ -197,6 +202,20 @@ fun App() {
 
     fun openEditor(e: Event) { editor = e; editorOpen = true }
 
+    var pendingBind by remember { mutableStateOf(bindWidgetId) }
+    var openedDeepLink by remember { mutableStateOf(false) }
+    LaunchedEffect(editEventId, events) {
+        if (editEventId != null && !openedDeepLink) {
+            events.firstOrNull { it.id == editEventId }?.let { openEditor(it); openedDeepLink = true }
+        }
+    }
+    LaunchedEffect(pendingBind) {
+        if (pendingBind != null && editor == null) {
+            val start = LocalDateTime.now().plusHours(2).truncatedTo(java.time.temporal.ChronoUnit.HOURS)
+            openEditor(Event(name = "", startMillis = start.atZone(zone).toInstant().toEpochMilli()))
+        }
+    }
+
     // Surface (not a bare Box) so text defaults to onBackground instead of black.
     val batteryRevoked = remember(tick) { Battery.revoked(ctx) }
     val unconfirmedSince = remember(tick) { ctx.unconfirmedSince }
@@ -251,16 +270,23 @@ fun App() {
             editor?.let { e ->
                 EditScreen(
                     event = e,
-                    onClose = { editorOpen = false },
+                    onClose = { editorOpen = false; pendingBind = null },
                     onSave = { saved ->
                         editorOpen = false
+                        val bindTo = pendingBind
+                        pendingBind = null
                         scope.launch(Dispatchers.IO) {
                             // The time or alarm may have changed: drop the old alarms first, rescheduleAll sets the new ones.
                             if (saved.id != 0) Scheduler.cancel(ctx, saved.id)
                             val row = dao.upsert(saved) // the new id for an insert, -1 for an update
                             Scheduler.rescheduleAll(ctx)
-                            // Only new timers ask; an edited one has its own "Add to home screen" button in the editor.
-                            if (saved.id == 0 && row > 0) withContext(Dispatchers.Main) { pinEvent = saved.copy(id = row.toInt()) }
+                            when {
+                                // This editor only opened to fill an empty widget: bind it, no need to also ask.
+                                bindTo != null && saved.id == 0 && row > 0 ->
+                                    WidgetPrefs.set(ctx, bindTo, WidgetPrefs.TIMER_EVENT + row, saved.title()).also { Scheduler.refreshWidget(ctx) }
+                                // Only new timers ask; an edited one has its own "Add to home screen" button in the editor.
+                                saved.id == 0 && row > 0 -> withContext(Dispatchers.Main) { pinEvent = saved.copy(id = row.toInt()) }
+                            }
                         }
                     },
                     onAddToHome = { pinEvent = it },

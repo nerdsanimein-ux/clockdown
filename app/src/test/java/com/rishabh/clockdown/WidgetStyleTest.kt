@@ -10,28 +10,22 @@ class WidgetStyleTest {
     private val own = Event(id = 2, name = "m", startMillis = 0)
 
     @Test
-    fun aWidgetsOwnStyleBeatsEverything() {
-        val e = own.copy(widgetStyle = WidgetStyle.BOLD.id)
-        assertEquals(WidgetStyle.GLASS, resolveStyle(WidgetStyle.GLASS, e, WidgetStyle.PAPER))
-    }
-
-    @Test
     fun aTimersOwnStyleBeatsTheClassDefault() {
-        assertEquals(WidgetStyle.BOLD, resolveStyle(null, own.copy(widgetStyle = "bold"), WidgetStyle.GLASS))
-        assertEquals(WidgetStyle.PAPER, resolveStyle(null, cls.copy(widgetStyle = "paper"), WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.BOLD, resolveStyle(own.copy(widgetStyle = "bold"), WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.PAPER, resolveStyle(cls.copy(widgetStyle = "paper"), WidgetStyle.GLASS))
     }
 
     @Test
     fun classesFollowTheClassDefaultAndTimersDoNot() {
-        assertEquals(WidgetStyle.GLASS, resolveStyle(null, cls, WidgetStyle.GLASS))
-        assertEquals(WidgetStyle.CARD, resolveStyle(null, own, WidgetStyle.GLASS))
-        assertEquals(WidgetStyle.CARD, resolveStyle(null, null, WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.GLASS, resolveStyle(cls, WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.CARD, resolveStyle(own, WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.CARD, resolveStyle(null, WidgetStyle.GLASS))
     }
 
     @Test
     fun anUnknownStyleIdFallsBack() {
         assertNull(WidgetStyle.of("nope"))
-        assertEquals(WidgetStyle.CARD, resolveStyle(null, own.copy(widgetStyle = "from-a-newer-version"), WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.CARD, resolveStyle(own.copy(widgetStyle = "from-a-newer-version"), WidgetStyle.GLASS))
     }
 
     @Test
@@ -40,8 +34,17 @@ class WidgetStyleTest {
         assertEquals(WidgetStyle.CARD, WidgetStyle.of("gradient"))
         assertEquals(WidgetStyle.GLASS, WidgetStyle.of("mono"))
         assertEquals(WidgetStyle.GLASS, WidgetStyle.of("outline"))
-        assertEquals(WidgetStyle.CARD, resolveStyle(WidgetStyle.of("gradient"), own, WidgetStyle.GLASS))
-        assertEquals(WidgetStyle.GLASS, resolveStyle(null, own.copy(widgetStyle = "outline"), WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.CARD, resolveStyle(own.copy(widgetStyle = "gradient"), WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.GLASS, resolveStyle(own.copy(widgetStyle = "outline"), WidgetStyle.GLASS))
+    }
+
+    @Test
+    fun twoWidgetsShowingTheSameTimerLookTheSame() {
+        // A Timer widget has no style of its own any more (see v1.2): only the event's own choice can affect it, so
+        // there is exactly one answer for "what does this timer look like", no matter how many widgets show it.
+        val e = own.copy(widgetStyle = "paper")
+        assertEquals(resolveStyle(e, WidgetStyle.GLASS), resolveStyle(e, WidgetStyle.GLASS))
+        assertEquals(WidgetStyle.PAPER, resolveStyle(e, WidgetStyle.GLASS))
     }
 
     @Test

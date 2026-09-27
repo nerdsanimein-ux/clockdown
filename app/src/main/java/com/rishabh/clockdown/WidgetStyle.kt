@@ -145,8 +145,9 @@ object Defaults {
 }
 
 /**
- * The single place that decides which style an event is drawn in, from most to least specific:
- * the widget's own override, then the event's own choice, then the class default (class timers only), then Card.
+ * The single place that decides which style a Timer widget draws an event in: the event's own choice (set in its
+ * Editor — the only place a timer's style lives), then the class default (class timers only), then Card. A Timer
+ * widget has no style of its own any more, so two widgets showing the same timer always look the same.
  */
-fun resolveStyle(widgetOverride: WidgetStyle?, event: Event?, classDefault: WidgetStyle): WidgetStyle =
-    widgetOverride ?: WidgetStyle.of(event?.widgetStyle) ?: if (event?.source == AMIZONE) classDefault else WidgetStyle.CARD
+fun resolveStyle(event: Event?, classDefault: WidgetStyle): WidgetStyle =
+    WidgetStyle.of(event?.widgetStyle) ?: if (event?.source == AMIZONE) classDefault else WidgetStyle.CARD
