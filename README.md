@@ -11,7 +11,7 @@ Clockdown counts down to the things you don't want to miss, so you can stop chec
 
 ## Install (Android 8 or newer)
 
-1. On your phone, open the [latest release](../../releases/latest) and download the file ending in `.apk`.
+1. On your phone, download [Clockdown.apk](https://github.com/nerdsanimein-ux/clockdown/releases/latest/download/Clockdown.apk) — this link always gets the newest version.
 2. Open the downloaded file. If Android asks, allow your browser to "install unknown apps", then tap **Install**.
 3. Open **Clockdown** and allow notifications when asked, so alarms can reach you.
 
@@ -27,6 +27,6 @@ Releasing:
 
 1. In `app/build.gradle.kts`, raise `versionCode` by 1 and set `versionName` (for example `1.1`).
 2. Put your signing details in `local.properties` (`release.storeFile`, `release.storePassword`, `release.keyAlias`, `release.keyPassword`). That file is git-ignored. Then run `./gradlew assembleRelease`.
-3. Create a GitHub release whose **tag is exactly the new `versionCode`** (for example `2`), whose title is the version name, whose description lists what's new in plain words, and attach `app/build/outputs/apk/release/app-release.apk`.
+3. Create a GitHub release whose **tag is exactly the new `versionCode`** (for example `2`), whose title is the version name, and whose description lists what's new in plain words. Attach `app/build/outputs/apk/release/app-release.apk` **twice**: once under the exact name `Clockdown.apk` (the permanent link students use always points here) and once under a versioned name like `Clockdown-1.2.apk` (the in-app updater just takes the first `.apk` it finds in the release, so this is what it actually fetches). Publish it as a normal release, not a draft or prerelease, so GitHub marks it **Latest** automatically.
 
-Keep your signing key safe and backed up. Android only installs an update if it is signed with the same key as the version already on the phone.
+Keep your signing key safe and backed up. Android only installs an update if it is signed with the same key as the version already on the phone. See `CLAUDE.md` for the full rule on why both asset names matter.
