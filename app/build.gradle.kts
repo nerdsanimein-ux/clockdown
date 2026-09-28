@@ -23,8 +23,8 @@ android {
         targetSdk = 36
         // Bump versionCode by 1 for EVERY release (a whole number; Android and the in-app updater compare it).
         // versionName is only the label people see, e.g. "1.1". The GitHub release tag must equal versionCode.
-        versionCode = 4
-        versionName = "1.2"
+        versionCode = 5
+        versionName = "1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Where crash reports go. Lives in local.properties (git-ignored); empty means crash reporting is simply off.

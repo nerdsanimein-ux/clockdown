@@ -1,10 +1,12 @@
 package com.rishabh.clockdown
 
 import android.content.Context
+import android.webkit.WebView
 import io.sentry.Sentry
 import io.sentry.SentryEvent
 import io.sentry.SentryLevel
 import io.sentry.android.core.SentryAndroid
+import io.sentry.protocol.Message
 
 /**
  * Crash reports, so a crash on a friend's phone can be fixed. Sent to Sentry, only if a DSN was built in and the user
@@ -38,7 +40,7 @@ object CrashReporting {
             o.environment = if (BuildConfig.DEBUG) "debug" else "release"
             o.isDebug = BuildConfig.DEBUG // the SDK logs what it sends to logcat, in debug builds only
             o.isSendDefaultPii = false
-            o.isEnableAutoSessionTracking = false
+            o.isEnableAutoSessionTracking = true // Release Health: crash-free session/user rates, no extra data collected
             o.tracesSampleRate = 0.0
             // No trail of what the person did or which apps ran: breadcrumbs are all off.
             o.isEnableUserInteractionBreadcrumbs = false
@@ -55,6 +57,25 @@ object CrashReporting {
     /** A problem that isn't a crash but is worth knowing about (for example a timetable we couldn't read). */
     fun note(what: String) {
         if (Sentry.isEnabled()) Sentry.captureMessage(scrub(what).orEmpty(), SentryLevel.WARNING)
+    }
+
+    /**
+     * The Amizone sign-in page failed to load (net/http/ssl). Only structured, non-secret facts go out: what kind of
+     * failure, the HTTP status or SSL/net error code, and the WebView version - never the URL (it can carry a session
+     * token or other identifiers) and never anything from the page itself. Device model and Android version are
+     * attached automatically by the SDK's default context.
+     */
+    fun noteLoginFailure(kind: String, httpStatus: Int? = null, code: String? = null) {
+        if (!Sentry.isEnabled()) return
+        val event = SentryEvent().apply {
+            level = SentryLevel.WARNING
+            message = Message().apply { formatted = "Amizone sign-in page failed to load"; message = formatted }
+        }
+        event.setTag("login.failureKind", kind) // "net", "http" or "ssl"
+        httpStatus?.let { event.setTag("login.httpStatus", it.toString()) }
+        code?.let { event.setTag("login.errorCode", it) }
+        WebView.getCurrentWebViewPackage()?.versionName?.let { event.setTag("login.webviewVersion", it) }
+        Sentry.captureEvent(event)
     }
 
     private fun clean(event: SentryEvent): SentryEvent {

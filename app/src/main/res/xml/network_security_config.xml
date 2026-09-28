@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Amizone's certificate chains to GlobalSign Root R46 (published 2019). Some Android 12/13 devices' system
+  trust store predates it - the OS-level CA list ships via Google Play system updates, a channel separate
+  from (and slower than, especially on some OEMs) updating Chrome or the WebView app itself. On those
+  devices WebView fails the handshake with "trust anchor not found" and silently cancels the page load,
+  even though the chain is genuine and Chrome accepts it (Chrome validates against its own bundled root
+  store, not the OS one). Adding the same public root as an extra trust anchor - alongside the system
+  store, not instead of it - fixes this without weakening validation anywhere: Amizone still has to present
+  the real GlobalSign-issued chain, and every other domain is unaffected.
+-->
+<network-security-config>
+    <domain-config>
+        <domain includeSubdomains="true">amizone.net</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/globalsign_root_r46" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

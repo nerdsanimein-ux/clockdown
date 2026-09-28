@@ -7,17 +7,25 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.http.SslError
 import android.os.Bundle
 import android.os.Looper
 import android.os.Handler
+import android.util.Log
 import android.webkit.CookieManager
 import android.widget.Toast
+import android.widget.Button
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.LinearLayout
+import android.webkit.ConsoleMessage
+import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.JsResult
 import android.view.View
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebStorage
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -261,8 +269,16 @@ class LoginActivity : ComponentActivity() {
     private var typedPassword = ""
     private lateinit var web: WebView
     private lateinit var status: TextView
+    private lateinit var progress: ProgressBar
+    private lateinit var retryPanel: LinearLayout
+    private lateinit var retryMessage: TextView
     private lateinit var auto: AutoLogin
     private val handler = Handler(Looper.getMainLooper())
+
+    /** The page itself failed to load (network, HTTP or TLS error) - distinct from [failed], which means the page
+     * loaded fine but Amizone refused a submitted login. Gates the loading spinner, the watchdog and the retry panel. */
+    private var loadFailed = false
+    private val loadWatchdog = Runnable { if (!done && !failed && !loadFailed) showLoadFailure("This is taking longer than usual.") }
 
     private fun say(text: String?) { status.text = text ?: ""; status.visibility = if (text == null) View.GONE else View.VISIBLE }
 
@@ -284,6 +300,7 @@ class LoginActivity : ComponentActivity() {
             text = "Your Amizone password is stored encrypted on this phone so signing in again is quicker. It is never sent anywhere except Amizone."
         }
         status = label(13.5f, (14 * dp).toInt()).apply { setBackgroundColor(0xFFFFE9C7.toInt()); visibility = View.GONE }
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { isIndeterminate = true; visibility = View.GONE }
 
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -292,11 +309,32 @@ class LoginActivity : ComponentActivity() {
             settings.allowContentAccess = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         }
+        val retryButton = Button(this).apply {
+            text = "Retry"
+            setOnClickListener {
+                loadFailed = false
+                retryPanel.visibility = View.GONE
+                web.visibility = View.VISIBLE
+                handler.removeCallbacksAndMessages(null)
+                pollsLeft = MAX_POLLS
+                web.reload()
+            }
+        }
+        retryMessage = label(13.5f, (14 * dp).toInt()).apply { setBackgroundColor(0) }
+        retryPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            visibility = View.GONE
+            addView(retryMessage, LinearLayout.LayoutParams(-1, -2))
+            addView(retryButton, LinearLayout.LayoutParams(-2, -2).apply { gravity = android.view.Gravity.CENTER; topMargin = (12 * dp).toInt() })
+        }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(note, LinearLayout.LayoutParams(-1, -2))
             addView(status, LinearLayout.LayoutParams(-1, -2))
+            addView(progress, LinearLayout.LayoutParams(-1, -2))
             addView(web, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(retryPanel, LinearLayout.LayoutParams(-1, 0, 1f))
         }
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val b = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
@@ -309,13 +347,30 @@ class LoginActivity : ComponentActivity() {
             override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean {
                 Toast.makeText(this@LoginActivity, message, Toast.LENGTH_LONG).show(); result.confirm(); return true
             }
+            // Diagnostics only (logcat, never uploaded): what the login page's own script had to say.
+            override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                Log.d("AmizoneLogin", "console: ${message.messageLevel()} ${message.message()} (${message.sourceId()}:${message.lineNumber()})")
+                return true
+            }
         }
         web.webViewClient = object : WebViewClient() {
             // Only the portal and its captcha provider may take over the page: no way to be steered to a look-alike site.
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = !LoginDetector.allowedPage(request.url.toString())
 
-            override fun onPageFinished(view: WebView, url: String) {
+            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                 if (done) return
+                Log.d("AmizoneLogin", "onPageStarted $url")
+                loadFailed = false
+                progress.visibility = View.VISIBLE
+                handler.removeCallbacks(loadWatchdog)
+                handler.postDelayed(loadWatchdog, LOAD_TIMEOUT_MS)
+            }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                Log.d("AmizoneLogin", "onPageFinished $url")
+                progress.visibility = View.GONE
+                handler.removeCallbacks(loadWatchdog)
+                if (done || loadFailed) return
                 val cookies = CookieManager.getInstance().getCookie(SITE)
                 if (LoginDetector.signedIn(url, cookies)) { signedIn(view, cookies!!); return }
                 if (isLoginPage(url)) {
@@ -323,9 +378,45 @@ class LoginActivity : ComponentActivity() {
                     startPolling()
                 }
             }
+
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                if (!request.isForMainFrame) return
+                Log.w("AmizoneLogin", "onReceivedError ${error.errorCode} ${error.description}")
+                CrashReporting.noteLoginFailure("net", code = error.errorCode.toString())
+                showLoadFailure("Couldn't reach Amizone. Check your connection and try again.")
+            }
+
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                if (!request.isForMainFrame) return
+                Log.w("AmizoneLogin", "onReceivedHttpError ${errorResponse.statusCode}")
+                CrashReporting.noteLoginFailure("http", httpStatus = errorResponse.statusCode)
+                showLoadFailure("Amizone returned an error (HTTP ${errorResponse.statusCode}). Please try again.")
+            }
+
+            override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+                // Never handler.proceed(): that would accept a certificate we haven't verified, a security hole.
+                // The default WebViewClient behaviour is handler.cancel(), which we keep, just no longer silently.
+                handler.cancel()
+                Log.w("AmizoneLogin", "onReceivedSslError ${error.primaryError}")
+                CrashReporting.noteLoginFailure("ssl", code = error.primaryError.toString())
+                showLoadFailure("Couldn't verify Amizone's security certificate, so the page was not loaded.")
+            }
         }
         setContentView(root)
         web.loadUrl(SITE)
+    }
+
+    /** The page didn't load: network, HTTP or TLS error, or nothing happened for [LOAD_TIMEOUT_MS]. Never for a page
+     * that loaded but whose login attempt Amizone refused (see [failAfterSubmit]). */
+    private fun showLoadFailure(message: String) {
+        if (done || loadFailed) return
+        loadFailed = true
+        handler.removeCallbacksAndMessages(null)
+        progress.visibility = View.GONE
+        web.stopLoading()
+        web.visibility = View.GONE
+        retryMessage.text = message
+        retryPanel.visibility = View.VISIBLE
     }
 
     private fun isLoginPage(url: String): Boolean {
@@ -361,7 +452,7 @@ class LoginActivity : ComponentActivity() {
     }
 
     private fun poll() {
-        if (done || failed || pollsLeft-- <= 0) return
+        if (done || failed || loadFailed || pollsLeft-- <= 0) return
         web.evaluateJavascript(LoginScripts.READ_STATE) { raw ->
             if (done || failed) return@evaluateJavascript
             val state = LoginScripts.parseState(raw, onLoginPage = true)
@@ -402,6 +493,7 @@ class LoginActivity : ComponentActivity() {
         const val POLL_MS = 500L
         const val MAX_POLLS = 240              // two minutes of watching the page, then leave it to the user
         const val WATCHDOG_MS = 20_000L
+        const val LOAD_TIMEOUT_MS = 20_000L    // nothing loaded after this long: stop waiting and offer Retry
         const val COOL_DOWN_MS = 2 * 60_000L   // a new login screen within this long of an automatic attempt won't auto-submit
     }
 }
