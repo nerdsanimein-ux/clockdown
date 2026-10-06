@@ -66,7 +66,7 @@ class WidgetConfigActivity : ComponentActivity() {
         if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return }
 
         val provider = AppWidgetManager.getInstance(this).getAppWidgetInfo(widgetId)?.provider?.className
-        val kind = when (provider) { TimersWidget::class.java.name -> Kind.LIST; ClassesWidget::class.java.name -> Kind.CLASSES; else -> Kind.TIMER }
+        val kind = when (provider) { TimersWidget::class.java.name -> Kind.LIST; ClassesWidget::class.java.name -> Kind.CLASSES; AttendanceWidget::class.java.name -> Kind.ATTENDANCE; else -> Kind.TIMER }
         setContent {
             ClockdownTheme {
                 if (kind == Kind.TIMER) {
@@ -196,9 +196,9 @@ private fun LookConfigScreen(kind: Kind, current: String?, currentStyle: WidgetS
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.statusBarsPadding().navigationBarsPadding().padding(horizontal = 20.dp)) {
             Spacer(Modifier.height(24.dp))
-            Text(if (kind == Kind.LIST) "List widget" else "Classes widget", style = MaterialTheme.typography.displaySmall)
+            Text(when (kind) { Kind.LIST -> "List widget"; Kind.ATTENDANCE -> "Attendance widget"; else -> "Classes widget" }, style = MaterialTheme.typography.displaySmall)
             Text(
-                if (kind == Kind.CLASSES) "Choose how this widget looks. You can change it later with a long-press on the widget."
+                if (kind != Kind.LIST) "Choose how this widget looks. You can change it later with a long-press on the widget."
                 else "Choose what this widget shows and how it looks. You can change it later with a long-press on the widget.",
                 style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
@@ -212,8 +212,11 @@ private fun LookConfigScreen(kind: Kind, current: String?, currentStyle: WidgetS
                 item { BackdropChooser(backdrop) { backdrop = it } }
                 item {
                     StylePicker(style, { style = it }, backdrop, automatic = "Automatic", columns = 1, tileHeight = 250.dp) { c, st, light ->
-                        if (kind == Kind.CLASSES) Widgets.classesView(c, sampleClasses, st, now, null, light)
-                        else Widgets.listView(c, sampleList, "Coming up", "", st, now, null, light)
+                        when (kind) {
+                            Kind.CLASSES -> Widgets.classesView(c, sampleClasses, st, now, null, light)
+                            Kind.ATTENDANCE -> Widgets.attendanceView(c, sampleAttendance(), st, null, null, light)
+                            else -> Widgets.listView(c, sampleList, "Coming up", "", st, now, null, light)
+                        }
                     }
                 }
                 if (kind == Kind.LIST) {
@@ -224,7 +227,7 @@ private fun LookConfigScreen(kind: Kind, current: String?, currentStyle: WidgetS
                 }
             }
             Button(
-                onClick = { onSave(if (kind == Kind.CLASSES) null else choice, null, style) },
+                onClick = { onSave(if (kind == Kind.LIST) choice else null, null, style) },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             ) { Text("Save") }
         }
@@ -255,3 +258,14 @@ private fun Choice(title: String, subtitle: String, emoji: String, selected: Boo
         }
     }
 }
+
+/** Made-up rows for the look picker, so the Attendance widget can be previewed before there is any real data. */
+fun sampleAttendance() = Widgets.AttModel(
+    "↻ Attendance 78.4% · 11:41 am",
+    listOf(
+        Widgets.AttRow("✅", "Data Structures", "9:30 am · Present", 0),
+        Widgets.AttRow("⏳", "Marketing Basics", "11:21 am · Not marked yet · 🟡 68.0%", 1),
+        Widgets.AttRow("🔴", "Business Law", "58.3% · attend next 9 to reach green", 2),
+    ),
+    "", false,
+)

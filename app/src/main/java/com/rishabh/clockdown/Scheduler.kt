@@ -15,6 +15,7 @@ const val SNOOZE = "com.rishabh.clockdown.SNOOZE"
 const val DISMISS = "com.rishabh.clockdown.DISMISS"
 
 private const val MIN = 60_000L
+private const val AFTER_CLASS_MS = 3 * 60_000L
 private const val DAY = 24 * 60 * MIN
 
 /** Run [block] off the main thread while keeping the receiver alive (Room forbids main-thread queries). */
@@ -38,6 +39,12 @@ object Scheduler {
 
     fun openApp(ctx: Context) = PendingIntent.getActivity(
         ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    /** Opens the Attendance screen (the Attendance widget and the attendance notifications land here). */
+    fun openAttendance(ctx: Context) = PendingIntent.getActivity(
+        ctx, 78, Intent(ctx, MainActivity::class.java).putExtra(EXTRA_OPEN_ATTENDANCE, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
     private fun exact(ctx: Context, at: Long, pi: PendingIntent) {
@@ -92,6 +99,9 @@ object Scheduler {
         am.cancel(pi)
         val midnight = java.time.LocalDate.now().plusDays(1).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() + 1000
         val dayFlips = upcoming.take(8).filter { it.startMillis - now >= DAY }.map { it.startMillis - ((it.startMillis - now) / DAY) * DAY + 1000 }
-        exact(ctx, (dayFlips + midnight).min(), pi)
+        // The same wakeup also fires a few minutes after the next class ends (see AlarmReceiver, REFRESH: that is when
+        // attendance gets one more look). No separate alarm: this one already exists, it just may come a little earlier.
+        val afterClass = AppDb.get(ctx).nextClassEnd(now - AFTER_CLASS_MS)?.plus(AFTER_CLASS_MS)?.takeIf { it > now }
+        exact(ctx, (dayFlips + midnight + listOfNotNull(afterClass)).min(), pi)
     }
 }

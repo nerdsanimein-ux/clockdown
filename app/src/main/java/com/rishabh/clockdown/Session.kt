@@ -49,6 +49,18 @@ object Session {
     fun userAgent(ctx: Context): String? = try { sp(ctx)?.getString("ua", null) } catch (e: Exception) { null }
     fun active(ctx: Context) = cookies(ctx) != null
 
+    /**
+     * Amizone renews a sign-in as you use it, by sending a fresh cookie with an ordinary reply. Keeping that fresh cookie is
+     * what keeps the sign-in alive; without it the original one runs out on its own clock however often the app is used.
+     * Only called with the replies of requests that SUCCEEDED, so a reply to a dead session can never replace a good cookie.
+     */
+    fun renew(ctx: Context, setCookies: List<String>) {
+        if (setCookies.isEmpty()) return
+        val old = cookies(ctx) ?: return
+        val merged = CookieMerge.merge(old, setCookies, System.currentTimeMillis())
+        if (merged != old) sp(ctx)?.edit()?.putString("cookies", merged)?.apply()
+    }
+
     fun save(ctx: Context, cookies: String, userAgent: String) {
         sp(ctx)?.edit()?.putString("cookies", cookies)?.putString("ua", userAgent)?.apply()
         ctx.prefs.edit().putBoolean("sessionExpired", false).apply()
@@ -73,6 +85,18 @@ enum class Verdict {
 object SessionCheck {
     /** Drops a leading byte-order mark and whitespace, which some servers put before the JSON. */
     fun trimBody(body: String) = body.trimStart('\uFEFF', ' ', '\n', '\r', '\t')
+
+    /**
+     * Same question for an HTML attendance page or fragment (the timetable endpoint answers JSON, these answer HTML, so
+     * [classify] would call every one of them "signed out"). Signed out: a redirect, a refusal, or the login page itself.
+     * A server problem is [Verdict.PROBLEM]. A normal page that has none of the [markers] is null: Amizone changed the page.
+     */
+    fun classifyPage(code: Int, body: String, markers: Array<out String>): Verdict? {
+        if (code in 300..399 || code == 401 || code == 403) return Verdict.EXPIRED
+        if (code !in 200..299) return Verdict.PROBLEM
+        if (body.contains("id=\"loginform\"") || body.contains("name=\"_UserName\"")) return Verdict.EXPIRED
+        return if (markers.any { body.contains(it) }) Verdict.OK else null
+    }
 
     /**
      * Signals that mean "signed out", in the order they are checked:
@@ -119,4 +143,28 @@ object LoginDetector {
         val host = u.host?.lowercase() ?: return false
         return u.scheme == "https" && (host == "amizone.net" || host.endsWith(".amizone.net") || host == "cloudflare.com" || host.endsWith(".cloudflare.com"))
     }
+}
+
+/** Applying Set-Cookie headers to the cookie string we send back. Pure, so every shape of header can be tested. */
+object CookieMerge {
+    fun merge(existing: String, setCookies: List<String>, nowMs: Long): String {
+        val jar = LinkedHashMap<String, String>()
+        existing.split(';').map { it.trim() }.filter { '=' in it }.forEach { jar[it.substringBefore('=')] = it.substringAfter('=') }
+        for (header in setCookies) {
+            val parts = header.split(';').map { it.trim() }
+            val name = parts[0].substringBefore('=')
+            val value = parts[0].substringAfter('=', "")
+            if (name.isEmpty() || '=' !in parts[0]) continue
+            val attrs = parts.drop(1)
+            val gone = value.isEmpty() ||
+                attrs.any { it.startsWith("max-age=", true) && (it.substringAfter('=').trim().toLongOrNull() ?: 1) <= 0 } ||
+                attrs.any { it.startsWith("expires=", true) && isPast(it.substringAfter('=').trim(), nowMs) }
+            if (gone) jar.remove(name) else jar[name] = value
+        }
+        return jar.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    }
+
+    private fun isPast(date: String, nowMs: Long) = try {
+        java.time.ZonedDateTime.parse(date, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() <= nowMs
+    } catch (e: Exception) { false }
 }

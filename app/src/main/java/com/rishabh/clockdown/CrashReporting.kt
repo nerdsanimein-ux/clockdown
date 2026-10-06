@@ -78,6 +78,20 @@ object CrashReporting {
         Sentry.captureEvent(event)
     }
 
+    /**
+     * Amizone's attendance page changed shape and couldn't be read. Only the failure TYPE goes out ("list-format" or
+     * "history-format") - never any attendance, course, name or page content. Device model and Android version ride along.
+     */
+    fun noteAttendanceFailure(kind: String) {
+        if (!Sentry.isEnabled()) return
+        val event = SentryEvent().apply {
+            level = SentryLevel.WARNING
+            message = Message().apply { formatted = "Attendance couldn't be read"; message = formatted }
+        }
+        event.setTag("attendance.failureKind", kind)
+        Sentry.captureEvent(event)
+    }
+
     private fun clean(event: SentryEvent): SentryEvent {
         event.user = null
         event.request = null

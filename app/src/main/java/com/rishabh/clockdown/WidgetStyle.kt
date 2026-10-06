@@ -30,7 +30,8 @@ enum class WidgetStyle(val id: String, val label: String, val blurb: String) {
 /** The text treatments a layout can have. RemoteViews can't change fonts or shadows, so each is its own layout. */
 enum class Variant { PLAIN, GLASS, LIGHTGLASS, HEAVY }
 
-enum class Kind { TIMER, CLASSES, LIST }
+/** ATTENDANCE is drawn in the List layouts (same rows, same four styles). */
+enum class Kind { TIMER, CLASSES, LIST, ATTENDANCE }
 
 /** What a widget needs to draw itself in a style: colours, which layout, and which backgrounds. All resolved once. */
 class Look(
@@ -102,7 +103,7 @@ object Looks {
             Variant.PLAIN -> R.layout.widget_classes; Variant.GLASS -> R.layout.w_classes_glass; Variant.LIGHTGLASS -> R.layout.w_classes_lightglass
             Variant.HEAVY -> R.layout.w_classes_heavy
         }
-        Kind.LIST -> when (variant) {
+        Kind.LIST, Kind.ATTENDANCE -> when (variant) {
             Variant.PLAIN -> R.layout.widget_timers; Variant.GLASS -> R.layout.w_list_glass; Variant.LIGHTGLASS -> R.layout.w_list_lightglass
             Variant.HEAVY -> R.layout.w_list_heavy
         }

@@ -13,6 +13,10 @@
                 <action android:name="com.rishabh.clockdown.DEBUG_RESET_BATTERY_PROMPT" />
                 <action android:name="com.rishabh.clockdown.DEBUG_STATUS" />
                 <action android:name="com.rishabh.clockdown.DEBUG_SYNC" />
+                <action android:name="com.rishabh.clockdown.DEBUG_PROBE" />
+                <action android:name="com.rishabh.clockdown.DEBUG_ATTENDANCE" />
+                <action android:name="com.rishabh.clockdown.DEBUG_ATT_REWIND" />
+                <action android:name="com.rishabh.clockdown.DEBUG_ALARM" />
                 <action android:name="com.rishabh.clockdown.DEBUG_SENTRY_TEST" />
             </intent-filter>
         </receiver>

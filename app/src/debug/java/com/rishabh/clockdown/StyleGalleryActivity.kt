@@ -24,7 +24,7 @@ import com.rishabh.clockdown.ui.theme.ClockdownTheme
 class StyleGalleryActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val kind = when (intent.getStringExtra("kind")) { "classes" -> Kind.CLASSES; "list" -> Kind.LIST; else -> Kind.TIMER }
+        val kind = when (intent.getStringExtra("kind")) { "classes" -> Kind.CLASSES; "list" -> Kind.LIST; "attendance" -> Kind.ATTENDANCE; else -> Kind.TIMER }
         val backdrop = Backdrop.entries.firstOrNull { it.name.equals(intent.getStringExtra("backdrop"), true) } ?: Backdrop.DARK
         val page = intent.getIntExtra("page", 0)
         val now = System.currentTimeMillis()
@@ -49,6 +49,9 @@ class StyleGalleryActivity : ComponentActivity() {
                             // Real widgets of these two are at least 4 columns wide, so one column of realistic tiles; 3 per page.
                             Kind.CLASSES -> WidgetStyle.entries.drop(page * 3).take(3).forEach { s ->
                                 WidgetPreview(backdrop, 300.dp, 250.dp) { ctx -> Widgets.classesView(ctx, listOf(a, b, c), s, now, null, backdrop.light) }
+                            }
+                            Kind.ATTENDANCE -> WidgetStyle.entries.drop(page * 3).take(3).forEach { s ->
+                                WidgetPreview(backdrop, 300.dp, 250.dp) { ctx -> Widgets.attendanceView(ctx, sampleAttendance(), s, null, null, backdrop.light) }
                             }
                             Kind.LIST -> WidgetStyle.entries.drop(page * 3).take(3).forEach { s ->
                                 WidgetPreview(backdrop, 300.dp, 250.dp) { ctx -> Widgets.listView(ctx, listOf(a, mine, b, c), "Coming up", "", s, now, null, backdrop.light) }

@@ -119,7 +119,10 @@ fun parseClasses(arr: JSONArray): List<Event> = (0 until arr.length()).map { arr
 }.sortedBy { it.startMillis }
 
 /** What one request to the timetable endpoint returned. Cookies and headers are deliberately not kept. */
-private class Reply(val code: Int, val contentType: String?, val body: String)
+internal class Reply(val code: Int, val contentType: String?, val body: String, val setCookies: List<String> = emptyList()) {
+    /** What an HTML attendance page's answer means for the session; null = a normal page, but not the one we expected (it changed shape). */
+    fun verdict(vararg markers: String): Verdict? = SessionCheck.classifyPage(code, body, markers)
+}
 
 object AmizoneSync {
     // No redirects: a 302 to the login page is one of the ways an expired session shows up (see SessionCheck).
@@ -143,45 +146,52 @@ object AmizoneSync {
         // All days must succeed before anything is changed, so a failure never leaves a half-updated timetable.
         val today = LocalDate.now(IST)
         val rows = mutableListOf<JSONArray>()
+        val renewed = mutableListOf<String>()
         val log = StringBuilder() // shown in the debug viewer: status and body only, never cookies
         for (day in (0L..7L).map { today.plusDays(it) }) {
             val r = try { fetchDay(day, cookies, ua) } catch (e: IOException) { return failed(ctx, "no connection (${e.javaClass.simpleName})") }
             log.append("== $day  HTTP ${r.code}\n${r.body.take(30_000)}\n\n")
             when (SessionCheck.classify(r.code, r.contentType, r.body)) {
-                Verdict.OK -> rows += try { JSONArray(SessionCheck.trimBody(r.body)) } catch (e: JSONException) { return failed(ctx, "unreadable reply for $day") }
+                Verdict.OK -> { renewed += r.setCookies; rows += try { JSONArray(SessionCheck.trimBody(r.body)) } catch (e: JSONException) { return failed(ctx, "unreadable reply for $day") } }
                 Verdict.EXPIRED -> { p.edit().putString("lastJson", log.toString()).apply(); return expired(ctx) }
                 Verdict.PROBLEM -> { p.edit().putString("lastJson", log.toString()).apply(); return failed(ctx, "unexpected reply HTTP ${r.code} for $day") }
             }
         }
         p.edit().putString("lastJson", log.toString().take(200_000)).apply()
+        Session.renew(ctx, renewed) // every day answered properly, so the renewed sign-in cookie is safe to keep
         val end = today.plusDays(8)
 
         val now = System.currentTimeMillis()
         val endMs = end.atStartOfDay(IST).toInstant().toEpochMilli()
+        // From the start of today, not from now: classes already over today stay, so they can show whether they were marked.
+        val from = today.atStartOfDay(IST).toInstant().toEpochMilli()
         // A row we can't parse must not wipe the timetable: keep old events and report failure.
         val fresh = try { rows.flatMap { parseClasses(it) } } catch (e: Exception) { return failed(ctx, "could not read the timetable") }
             .distinctBy { it.amizoneId }
-            .filter { it.startMillis in (now + 1) until endMs }
+            .filter { it.startMillis in from until endMs }
             .sortedBy { it.startMillis }
 
-        AppDb.get(ctx).replaceAmizone(now, endMs, fresh).forEach { Scheduler.cancel(ctx, it) }
+        AppDb.get(ctx).replaceAmizone(from - 1, endMs, fresh).forEach { Scheduler.cancel(ctx, it) }
         p.edit().putLong("lastSync", now).putBoolean("unconfirmed", false).putBoolean("sessionExpired", false).remove("lastFailure").apply()
         Scheduler.rescheduleAll(ctx) // also refreshes the widgets, which drop their "Unconfirmed" note
         ctx.getSystemService(NotificationManager::class.java).cancel(SIGN_IN_ID)
         return SyncResult.OK
     }
 
-    private fun fetchDay(day: LocalDate, cookies: String, ua: String): Reply {
-        val url = "$SITE/Calendar/home/GetDiaryEvents".toHttpUrl().newBuilder()
-            .addQueryParameter("start", day.toString()).addQueryParameter("end", day.plusDays(1).toString()).build()
+    private fun fetchDay(day: LocalDate, cookies: String, ua: String): Reply =
+        fetch("/Calendar/home/GetDiaryEvents", mapOf("start" to day.toString(), "end" to day.plusDays(1).toString()), cookies, ua, xhr = true, json = true)
+
+    /** One GET to the portal with the saved session. [xhr] is how the page's own scripts ask for fragments; whole pages are asked for plainly. */
+    internal fun fetch(path: String, query: Map<String, String>, cookies: String, ua: String, xhr: Boolean, json: Boolean = false): Reply {
+        val url = "$SITE$path".toHttpUrl().newBuilder().apply { query.forEach { (k, v) -> addQueryParameter(k, v) } }.build()
         val req = Request.Builder().url(url)
-            .header("Accept", "application/json, text/javascript, */*; q=0.01")
-            .header("X-Requested-With", "XMLHttpRequest")
+            .header("Accept", if (json) "application/json, text/javascript, */*; q=0.01" else "text/html,*/*;q=0.8")
+            .apply { if (xhr) header("X-Requested-With", "XMLHttpRequest") }
             .header("Referer", "$SITE/Home")
             .header("User-Agent", ua)
             .header("Cookie", cookies)
             .build()
-        return client.newCall(req).execute().use { Reply(it.code, it.header("Content-Type"), it.body.string()) }
+        return client.newCall(req).execute().use { Reply(it.code, it.header("Content-Type"), it.body.string(), it.headers("Set-Cookie")) }
     }
 
     /** The timetable on screen is the last confirmed one; say so, in the app and on the widgets. */
@@ -203,14 +213,14 @@ object AmizoneSync {
         return SyncResult.FAILED
     }
 
-    private fun expired(ctx: Context): SyncResult {
+    internal fun expired(ctx: Context): SyncResult {
         ctx.prefs.edit().putBoolean("sessionExpired", true).apply()
         markUnconfirmed(ctx)
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("sync", "Amizone sign-in", NotificationManager.IMPORTANCE_DEFAULT))
         nm.notify(SIGN_IN_ID, Notification.Builder(ctx, "sync")
             .setSmallIcon(android.R.drawable.stat_notify_error)
-            .setContentTitle("Amizone sign-in needed").setContentText("Tap to sign in again. Your alarms keep working meanwhile.")
+            .setContentTitle("Amizone sign-in needed").setContentText("Tap to reconnect Amizone. Your alarms and last known attendance keep showing meanwhile.")
             .setContentIntent(PendingIntent.getActivity(ctx, 1, Intent(ctx, LoginActivity::class.java),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setAutoCancel(true).setOnlyAlertOnce(true).build())
@@ -224,6 +234,7 @@ object AmizoneSync {
     fun signOut(ctx: Context) {
         Session.clear(ctx)
         ctx.prefs.edit().remove("lastSync").remove("lastJson").remove("unconfirmed").remove("sessionExpired").apply()
+        AttendanceStore.clear(ctx)
         WorkManager.getInstance(ctx).cancelUniqueWork("amizone")
         ctx.getSystemService(NotificationManager::class.java).cancel(SIGN_IN_ID)
         AppDb.get(ctx).deleteAmizone().forEach { Scheduler.cancel(ctx, it) }
@@ -246,7 +257,11 @@ object AmizoneSync {
 
 class SyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     override fun doWork(): Result =
-        if (AmizoneSync.run(applicationContext) == SyncResult.FAILED) Result.retry() else Result.success()
+        AmizoneSync.run(applicationContext).let { result ->
+            // The attendance rides along on this existing check (at most every 3 hours), so it adds no background work of its own.
+            if (result == SyncResult.OK) AttendanceWakeups.enqueue(applicationContext, 3 * 3_600_000L, "attendance-periodic")
+            if (result == SyncResult.FAILED) Result.retry() else Result.success()
+        }
 }
 
 /**

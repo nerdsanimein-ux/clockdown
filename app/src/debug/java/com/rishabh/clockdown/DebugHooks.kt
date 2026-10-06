@@ -25,6 +25,58 @@ class DebugHooks : BroadcastReceiver() {
                 }
                 return
             }
+            // Session-lifetime measurement: "init" copies the current login into two variants (A = as saved, B = follows
+            // Set-Cookie renewals); every other call probes both and appends status + cookie NAMES and expiry to probe.log.
+            "com.rishabh.clockdown.DEBUG_PROBE" -> {
+                val pending = goAsync()
+                kotlin.concurrent.thread { pending.resultData = SessionProbe.run(ctx, intent.getBooleanExtra("init", false)); pending.finish() }
+                return
+            }
+            // Runs one attendance refresh now and reports the outcome and COUNTS only (never a course, a name or a number from the data).
+            "com.rishabh.clockdown.DEBUG_ATTENDANCE" -> {
+                val pending = goAsync()
+                kotlin.concurrent.thread {
+                    val r = AttendanceSync.run(ctx, force = true)
+                    val snap = AttendanceStore.load(ctx)
+                    pending.resultData = "att=$r failure=${ctx.attFailure} courses=${snap?.courses?.size} tracked=${snap?.courses?.count { it.tracked }} records=${snap?.courses?.sumOf { it.records.size }}"
+                    pending.finish()
+                }
+                return
+            }
+            // Test aid for the notifications: rewinds the saved attendance so the NEXT real refresh sees a change.
+            // "marks" forgets today's rows; "zone" pretends the first non-green subject used to be fully green.
+            "com.rishabh.clockdown.DEBUG_ATT_REWIND" -> {
+                val snap = AttendanceStore.load(ctx)
+                if (snap != null) {
+                    val today = java.time.LocalDate.now(AMIZONE_ZONE)
+                    val marks = intent.getStringExtra("what") != "zone"
+                    var done = false
+                    val rewound = snap.courses.map { c ->
+                        if (marks) c.copy(records = c.records.filter { it.date != today }, attended = c.attended - c.records.filter { it.date == today }.sumOf { it.present }, total = c.total - c.records.filter { it.date == today }.sumOf { it.present + it.absent })
+                        else if (!done && c.tracked && ctx.zoneOf(c) != Zone.GREEN) { done = true; c.copy(attended = c.total, records = emptyList()) } else c
+                    }
+                    AttendanceStore.save(ctx, snap.copy(courses = rewound))
+                }
+            }
+            // Fires an alarm as if its time had come: kind=class (the first unmarked class today, in an at-risk subject if any) or kind=timer.
+            "com.rishabh.clockdown.DEBUG_ALARM" -> {
+                val pending = goAsync()
+                kotlin.concurrent.thread {
+                    val dao = AppDb.get(ctx)
+                    val e = if (intent.getStringExtra("kind") == "timer") {
+                        val id = dao.byId(900001) ?: Event(id = 900001, name = "Test timer", startMillis = System.currentTimeMillis() + 3_600_000).also { dao.upsert(it) }
+                        id
+                    } else {
+                        val snap = AttendanceStore.load(ctx)
+                        val dayStart = java.time.LocalDate.now(AMIZONE_ZONE).atStartOfDay(AMIZONE_ZONE).toInstant().toEpochMilli()
+                        val today = dao.classesBetween(dayStart, dayStart + 86_400_000L)
+                        today.firstOrNull { snap != null && snap.markFor(it) == ClassMark.NOT_MARKED && snap.course(it.courseCode)?.let { c -> ctx.zoneOf(c) != Zone.GREEN } == true } ?: today.first()
+                    }
+                    Alarms.fire(ctx, e.id, e.title(), e.room.orEmpty(), "Starting soon")
+                    pending.resultData = "fired ${e.source}"; pending.finish()
+                }
+                return
+            }
             // Sends one harmless test event to the crash-report service, to prove the wiring works.
             "com.rishabh.clockdown.DEBUG_SENTRY_TEST" -> {
                 CrashReporting.note("Clockdown test event (safe to ignore)")
@@ -39,5 +91,45 @@ class DebugHooks : BroadcastReceiver() {
                 "batteryExempt=${Battery.exempt(ctx)} batteryAsked=${ctx.prefs.getBoolean("batteryAsked", false)} " +
                 "autoLoginAt=${ctx.prefs.getLong("autoLoginAt", 0)}",
         )
+    }
+}
+
+/** Debug only. Measures how Amizone sessions end. Logs HTTP status, which cookies the server (re)sets and their expiry; never a cookie value. */
+object SessionProbe {
+    private val LF = System.lineSeparator()
+    private fun jar(ctx: Context) = java.io.File(ctx.filesDir, "probe_cookies.txt")
+    private fun log(ctx: Context) = java.io.File(ctx.filesDir, "probe.log")
+    private fun parse(s: String) = s.split(";").map { it.trim() }.filter { "=" in it }.associate { it.substringBefore("=") to it.substringAfter("=") }.toMutableMap()
+
+    fun run(ctx: Context, init: Boolean): String {
+        val now = java.time.LocalTime.now(java.time.ZoneId.of("Asia/Kolkata")).withNano(0)
+        if (init) {
+            val c = Session.cookies(ctx) ?: return "no session"
+            jar(ctx).writeText(c + LF + c)
+            log(ctx).writeText("$now init names=${parse(c).keys}" + LF)
+            return "init ok"
+        }
+        val lines = jar(ctx).readLines().toMutableList()
+        val client = okhttp3.OkHttpClient.Builder().followRedirects(false).build()
+        val day = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"))
+        val out = StringBuilder()
+        for ((i, name) in listOf("A", "B").withIndex()) {
+            val line = try {
+                val r = client.newCall(okhttp3.Request.Builder()
+                    .url("https://s.amizone.net/Calendar/home/GetDiaryEvents?start=$day&end=${day.plusDays(1)}")
+                    .header("Cookie", lines[i]).header("User-Agent", Session.userAgent(ctx) ?: "")
+                    .header("Accept", "application/json, text/javascript, */*; q=0.01").header("X-Requested-With", "XMLHttpRequest")
+                    .header("Referer", "https://s.amizone.net/Home").build()).execute()
+                val body = r.body.string()
+                val verdict = SessionCheck.classify(r.code, r.header("Content-Type"), body)
+                val sets = r.headers("Set-Cookie")
+                if (name == "B") { val m = parse(lines[i]); sets.forEach { sc -> val kv = sc.substringBefore(";"); m[kv.substringBefore("=")] = kv.substringAfter("=") }; lines[i] = m.entries.joinToString("; ") { "${it.key}=${it.value}" } }
+                "$name HTTP ${r.code} $verdict setCookies=" + sets.joinToString(" | ") { sc -> sc.substringBefore("=") + " [" + sc.split(";").drop(1).map { it.trim() }.filter { a -> a.lowercase().startsWith("expires") || a.lowercase().startsWith("max-age") }.joinToString(",") + "]" }
+            } catch (e: Exception) { "$name ERR ${e.javaClass.simpleName}" }
+            out.append(line).append("; ")
+        }
+        jar(ctx).writeText(lines.joinToString(LF))
+        log(ctx).appendText("$now $out" + LF)
+        return out.toString()
     }
 }

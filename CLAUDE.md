@@ -21,3 +21,23 @@ now on must:
 
 Never remove or rename an existing release's `.apk` asset after the fact — people on older versions still fetch it
 by URL from the update they're on.
+
+## Before every release: signing-key and update-path checks
+
+Android refuses to install an update whose signing certificate doesn't match the certificate already on the
+device (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, shown to the user as "Update didn't finish, this update can't be
+installed over the version you have"). Since students only ever update in place via the permanent link, a key
+change silently locks out everyone already on the app. Before publishing any new release:
+
+1. **Compare signing certificates.** Build the new release APK, then run
+   `apksigner verify --print-certs <new.apk>` and the same against the currently-published `Clockdown.apk` (or its
+   versioned asset) from the latest GitHub release. The certificate SHA-256 digest must match exactly. If it
+   doesn't, stop — do not publish. Figure out why the signing config picked up a different keystore/alias before
+   doing anything else.
+2. **Test the in-app update from the previous version.** Install the *currently published* release on an
+   emulator (or device), then use the app's own updater (`Settings → Check for updates`) to update to the new
+   build. Confirm the update actually completes and the app opens afterward — don't just trust that the build
+   succeeded.
+
+Never release if either check fails. Never work around a signature mismatch by asking a student to uninstall and
+reinstall — that should be a last-resort fix for a one-off broken device, not the default plan for a release.

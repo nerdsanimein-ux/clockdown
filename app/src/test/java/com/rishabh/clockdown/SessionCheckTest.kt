@@ -56,3 +56,24 @@ class SessionCheckTest {
         assertEquals(false, shouldWarnUnconfirmed(false, expired = true, flagged = true, lastSync = 1, now = 99 * hour))
     }
 }
+
+class CookieMergeTest {
+    private val now = java.time.ZonedDateTime.of(2026, 10, 6, 12, 0, 0, 0, java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+
+    @org.junit.Test fun aRenewedSignInReplacesTheOldOneAndTheRestStay() {
+        val out = CookieMerge.merge("a=1; .ASPXAUTH=OLD; b=2", listOf(".ASPXAUTH=NEW; path=/; HttpOnly"), now)
+        org.junit.Assert.assertEquals("a=1; .ASPXAUTH=NEW; b=2", out)
+    }
+
+    @org.junit.Test fun newCookiesAreAddedAndAClearingHeaderRemovesOne() {
+        org.junit.Assert.assertEquals("a=1; c=3", CookieMerge.merge("a=1", listOf("c=3; path=/"), now))
+        org.junit.Assert.assertEquals("a=1", CookieMerge.merge("a=1; b=2", listOf("b=; expires=Thu, 01 Jan 1970 00:00:00 GMT"), now))
+        org.junit.Assert.assertEquals("a=1", CookieMerge.merge("a=1; b=2", listOf("b=x; Max-Age=0"), now))
+        org.junit.Assert.assertEquals("a=1; b=x", CookieMerge.merge("a=1; b=2", listOf("b=x; expires=Fri, 01 Jan 2100 00:00:00 GMT"), now))
+    }
+
+    @org.junit.Test fun nothingChangesWhenThereIsNothingToApply() {
+        org.junit.Assert.assertEquals("a=1; b=2", CookieMerge.merge("a=1; b=2", emptyList(), now))
+        org.junit.Assert.assertEquals("a=1; b=2", CookieMerge.merge("a=1; b=2", listOf("garbage", "=x"), now))
+    }
+}

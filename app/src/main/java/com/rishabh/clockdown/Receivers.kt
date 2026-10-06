@@ -34,7 +34,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.rishabh.clockdown.ui.theme.ClockdownTheme
 
-private const val ALARM_CH = "alarm"
 private const val START_CH = "start"
 
 class AlarmReceiver : BroadcastReceiver() {
@@ -45,48 +44,20 @@ class AlarmReceiver : BroadcastReceiver() {
         fun withRoom(text: String) = if (room.isBlank()) text else "$text · $room"
         val nm = ctx.getSystemService(NotificationManager::class.java)
         when (intent.action) {
-            // Notification id: +id for the alarm, -id for the start notification.
-            ALARM -> ring(ctx, nm, id, name, room, withRoom("Starting soon"))
+            // Notification id: +id for the alarm, -id for the start notification. The alarm is the short alert (see Alarms).
+            ALARM -> async { Alarms.fire(ctx, id, name, room, withRoom("Starting soon")) }
             START -> {
                 nm.createNotificationChannel(NotificationChannel(START_CH, "Event started", NotificationManager.IMPORTANCE_DEFAULT))
                 nm.notify(-id, Notification.Builder(ctx, START_CH)
                     .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
                     .setContentTitle(name).setContentText(withRoom("Starting now"))
                     .setContentIntent(Scheduler.openApp(ctx)).setAutoCancel(true).build())
-                async { Scheduler.refreshWidget(ctx) }
+                async { Scheduler.refreshWidget(ctx); AttendanceWakeups.classStarted(ctx) }
             }
-            REFRESH -> async { Scheduler.refreshWidget(ctx) }
-            DISMISS -> nm.cancel(id)
-            SNOOZE -> { nm.cancel(id); Scheduler.snooze(ctx, id, name, room) }
+            REFRESH -> async { Scheduler.refreshWidget(ctx); AttendanceWakeups.refreshTick(ctx) }
+            DISMISS -> { nm.cancel(id); Alarms.stopRinging(ctx) }
+            SNOOZE -> { nm.cancel(id); Alarms.stopRinging(ctx); Scheduler.snooze(ctx, id, name, room) }
         }
-    }
-
-    private fun ring(ctx: Context, nm: NotificationManager, id: Int, name: String, room: String, text: String) {
-        nm.createNotificationChannel(NotificationChannel(ALARM_CH, "Event alarms", NotificationManager.IMPORTANCE_HIGH).apply {
-            setSound(
-                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
-                AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build(),
-            )
-            enableVibration(true)
-        })
-        // What pops up over the lock screen: a dedicated alarm screen, not the whole app.
-        val screen = PendingIntent.getActivity(
-            ctx, id,
-            Intent(ctx, AlarmActivity::class.java).putExtra("id", id).putExtra("name", name).putExtra("room", room),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val n = Notification.Builder(ctx, ALARM_CH)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle(name).setContentText(text)
-            .setCategory(Notification.CATEGORY_ALARM)
-            .setContentIntent(screen)
-            .setFullScreenIntent(screen, true)
-            .addAction(Notification.Action.Builder(null, "Dismiss", Scheduler.broadcast(ctx, DISMISS, id, name, room)).build())
-            .addAction(Notification.Action.Builder(null, "Snooze 5 min", Scheduler.broadcast(ctx, SNOOZE, id, name, room)).build())
-            .setTimeoutAfter(5 * 60_000L) // ponytail: stops ringing after 5 min; no separate alarm service
-            .build()
-        n.flags = n.flags or Notification.FLAG_INSISTENT // repeat the sound until dismissed
-        nm.notify(id, n)
     }
 }
 

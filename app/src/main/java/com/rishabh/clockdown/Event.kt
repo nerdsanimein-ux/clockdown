@@ -48,6 +48,14 @@ abstract class EventDao {
     @Query("SELECT * FROM events WHERE startMillis > :now ORDER BY startMillis")
     abstract fun upcoming(now: Long): List<Event>
 
+    /** The soonest end among classes that haven't finished (an in-progress class counts), or null. */
+    @Query("SELECT MIN(endMillis) FROM events WHERE source = 'amizone' AND endMillis > :now")
+    abstract fun nextClassEnd(now: Long): Long?
+
+    /** Classes starting in [from, to): today's, finished ones included. */
+    @Query("SELECT * FROM events WHERE source = 'amizone' AND startMillis >= :from AND startMillis < :to ORDER BY startMillis")
+    abstract fun classesBetween(from: Long, to: Long): List<Event>
+
     @Query("SELECT * FROM events WHERE id = :id")
     abstract fun byId(id: Int): Event?
 

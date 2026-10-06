@@ -31,6 +31,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -221,6 +224,98 @@ fun SettingsScreen(
                     label = { Text("Minutes before class") }, singleLine = true, enabled = alarmsOn,
                     shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+            }
+
+            Group("Alert sound") {
+                var sound by remember { mutableStateOf(ctx.alertSound) }
+                var long by remember { mutableStateOf(ctx.longRing) }
+                var motion by remember { mutableStateOf(ctx.motionStop) }
+                DisposableEffect(Unit) { onDispose { Alarms.stopPreview() } }
+                Text(
+                    "Class and timer alerts play a short sound for two seconds with a quick buzz, then stop by themselves.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                AlertSound.entries.forEach { s ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable { sound = s; ctx.prefs.edit().putString("alertSound", s.id).apply(); Alarms.preview(ctx, s) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(sound == s, { sound = s; ctx.prefs.edit().putString("alertSound", s.id).apply(); Alarms.preview(ctx, s) })
+                        Text(s.label, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                        IconButton(onClick = { Alarms.preview(ctx, s) }) { Icon(Icons.Filled.PlayArrow, contentDescription = "Play ${s.label}") }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Long ring for timers", style = MaterialTheme.typography.titleMedium)
+                        Text("Your own timers keep ringing until you dismiss them (ten minutes at most). Classes always use the short alert.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(long, { long = it; ctx.prefs.edit().putBoolean("longRing", it).apply() })
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Stop when picked up or turned face down", style = MaterialTheme.typography.titleMedium)
+                        Text("Only for Long ring. Uses the motion sensors, and only while a timer is ringing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(motion, { motion = it; ctx.prefs.edit().putBoolean("motionStop", it).apply() }, enabled = long)
+                }
+            }
+
+            Group("Attendance") {
+                var green by remember { mutableStateOf(ctx.attGreen.toString()) }
+                var yellow by remember { mutableStateOf(ctx.attYellow.toString()) }
+                var marks by remember { mutableStateOf(ctx.attNotifyMarks) }
+                var drops by remember { mutableStateOf(ctx.attNotifyZone) }
+                var dontSkip by remember { mutableStateOf(ctx.attNotifyDontSkip) }
+                val g = green.toIntOrNull()
+                val y = yellow.toIntOrNull()
+                val valid = g != null && y != null && g in 2..99 && y in 1 until g
+                fun save() { if (valid) { ctx.prefs.edit().putInt("attGreen", g!!).putInt("attYellow", y!!).apply(); apply() } }
+                Text("Stay above", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Every \"attend the next\" and \"you can miss\" number is worked out against this. Amizone's minimum is 75%.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TargetChips(ctx.attTarget) { ctx.prefs.edit().putInt("attTarget", it).apply(); apply() }
+                Text("Colours", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "As on Amizone's own chart: green is above 85%, yellow is 75% to 85%, red is below 75%. Change the lines here if you like.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        green, { green = it.filter(Char::isDigit).take(2); save() }, label = { Text("Green above %") }, singleLine = true,
+                        shape = MaterialTheme.shapes.large, modifier = Modifier.weight(1f), isError = !valid,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    OutlinedTextField(
+                        yellow, { yellow = it.filter(Char::isDigit).take(2); save() }, label = { Text("Yellow from %") }, singleLine = true,
+                        shape = MaterialTheme.shapes.large, modifier = Modifier.weight(1f), isError = !valid,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
+                if (!valid) Text("Both must be between 1 and 99, and yellow lower than green. The last valid numbers are in use.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Text("Alerts", style = MaterialTheme.typography.titleSmall)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Tell me when attendance is marked", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    Switch(marks, { marks = it; ctx.prefs.edit().putBoolean("attNotifyMarks", it).apply() })
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Tell me when a subject drops to yellow or red", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    Switch(drops, { drops = it; ctx.prefs.edit().putBoolean("attNotifyZone", it).apply() })
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("\"Don't skip\" before yellow and red classes", style = MaterialTheme.typography.titleMedium)
+                        Text("Sent when the class alarm would go off, for a subject you're at risk in. Needs class alarms on.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(dontSkip, { dontSkip = it; ctx.prefs.edit().putBoolean("attNotifyDontSkip", it).apply() })
+                }
+                Text(
+                    "Attendance is refreshed when you open the app, when you pull down on the Attendance tab or tap the widget, and now and then around class times. " +
+                        "It stays on this phone.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 

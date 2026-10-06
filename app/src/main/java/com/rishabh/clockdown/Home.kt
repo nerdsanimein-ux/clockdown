@@ -14,7 +14,11 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.foundation.clickable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
@@ -141,7 +145,7 @@ internal fun Event.subtitle(): String {
  * exact widget instead of asking "add to home screen?" (it's already going there).
  */
 @Composable
-fun App(editEventId: Int? = null, bindWidgetId: Int? = null) {
+fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boolean = false) {
     val ctx = LocalContext.current
     val dao = remember { AppDb.get(ctx) }
     val scope = rememberCoroutineScope()
@@ -157,6 +161,8 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null) {
     var settingsOpen by remember { mutableStateOf(false) }
     var pinEvent by remember { mutableStateOf<Event?>(null) } // a timer that was just saved: offer to put it on the home screen
     var addWidgetOpen by remember { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableIntStateOf(if (openAttendance) 1 else 0) } // 0 = Home, 1 = Attendance
+    var attSyncing by remember { mutableStateOf(false) }
     // null while we check whether this is a first run; nothing is asked of the person until then.
     var onboarding by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(Unit) { onboarding = withContext(Dispatchers.IO) { Onboarding.needed(ctx) } }
@@ -168,10 +174,24 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null) {
         if (!manual && System.currentTimeMillis() - ctx.prefs.getLong("lastSync", 0) < 60_000) return
         syncing = true
         scope.launch {
-            val result = withContext(Dispatchers.IO) { AmizoneSync.run(ctx, force = manual) }
+            val result = withContext(Dispatchers.IO) {
+                // Attendance follows the timetable (same sign-in, so a dead sign-in is found once and not twice).
+                AmizoneSync.run(ctx, force = manual).also { if (it == SyncResult.OK) AttendanceSync.run(ctx, minGapMs = if (manual) 0 else 60_000, force = manual) }
+            }
             syncing = false
             tick++
             if (manual) Toast.makeText(ctx, result.message, Toast.LENGTH_SHORT).show()
+        }
+    }
+    // Pull-to-refresh on the Attendance screen: attendance only, always runs.
+    fun refreshAttendance() {
+        if (!ctx.amizoneConnected || attSyncing) return
+        attSyncing = true
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { AttendanceSync.run(ctx, force = true) }
+            attSyncing = false
+            tick++
+            if (r == AttResult.FAILED) Toast.makeText(ctx, r.message, Toast.LENGTH_SHORT).show()
         }
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -220,10 +240,18 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null) {
     val batteryRevoked = remember(tick) { Battery.revoked(ctx) }
     val unconfirmedSince = remember(tick) { ctx.unconfirmedSince }
     val expired = remember(tick) { ctx.sessionExpired }
+    val attendance = remember(tick) { AttendanceStore.load(ctx) }
+    val attFailure = remember(tick) { ctx.attFailure }
+    BackHandler(enabled = tab == 1) { tab = 0 } // the Attendance screens inside close first, then this goes back to Home
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Box {
-        CompositionLocalProvider(LocalUnconfirmed provides (unconfirmedSince != null)) { HomeScreen(
+      Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) {
+        CompositionLocalProvider(LocalUnconfirmed provides (unconfirmedSince != null), LocalAttendance provides attendance) { if (tab == 1) AttendanceTab(
+            snap = attendance, events = events, connected = connected, expired = expired, failure = attFailure, refreshing = attSyncing,
+            onRefresh = ::refreshAttendance, onReconnect = { ctx.startActivity(Intent(ctx, LoginActivity::class.java)) },
+        ) else HomeScreen(
             events = events, now = now, connected = connected, syncing = syncing,
             expired = expired, unconfirmedSince = unconfirmedSince,
+            attendance = attendance, attFailure = attFailure, onAttendance = { tab = 1 },
             batteryRevoked = batteryRevoked,
             onBatteryFix = { ctx.startActivity(Battery.requestIntent(ctx)) },
             onBatteryDismiss = { Battery.dismissWarning(ctx); tick++ },
@@ -239,6 +267,12 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null) {
             },
             onEdit = ::openEditor,
         ) }
+      }
+        NavigationBar {
+            NavigationBarItem(tab == 0, { tab = 0 }, icon = { Icon(Icons.Filled.Home, contentDescription = null) }, label = { Text("Home") })
+            NavigationBarItem(tab == 1, { tab = 1 }, icon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) }, label = { Text("Attendance") })
+        }
+      }
 
         // Fade content out under the status bar so the clock and icons stay readable while scrolling.
         Box(
@@ -325,6 +359,7 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null) {
 private fun HomeScreen(
     events: List<Event>, now: Long, connected: Boolean, syncing: Boolean, updateReady: Boolean,
     expired: Boolean, unconfirmedSince: Long?, onSignIn: () -> Unit,
+    attendance: AttSnapshot?, attFailure: String?, onAttendance: () -> Unit,
     batteryRevoked: Boolean, onBatteryFix: () -> Unit, onBatteryDismiss: () -> Unit,
     onSync: () -> Unit, onSettings: () -> Unit, onAddWidget: () -> Unit, onNew: () -> Unit, onEdit: (Event) -> Unit,
 ) {
@@ -344,7 +379,7 @@ private fun HomeScreen(
         bottomBar = {
             Surface(color = MaterialTheme.colorScheme.background) {
                 Row(
-                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -379,6 +414,8 @@ private fun HomeScreen(
                 AssistChip(onClick = onAddWidget, label = { Text("Add widget to home screen") }, leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp)) })
             }
 
+            if (connected) item(key = "attendance", span = full) { AttendanceCard(attendance, attFailure, expired, onAttendance) }
+
             if (batteryRevoked) item(key = "battery", span = full) { BatteryWarning(onBatteryFix, onBatteryDismiss) }
 
             if (connected && (expired || unconfirmedSince != null)) {
@@ -393,7 +430,8 @@ private fun HomeScreen(
                 }
             }
 
-            timeline("Today", today, classes.filter { it.day() == today }, connected, now, "No more classes today")
+            // The whole day, classes already over included: each shows whether it was marked.
+            timeline("Today", today, events.filter { it.source == AMIZONE && it.day() == today }, connected, now, "No classes today")
             timeline("Tomorrow", today.plusDays(1), classes.filter { it.day() == today.plusDays(1) }, connected, now, "No classes tomorrow")
 
             // My timers: only my own events, soonest first. Classes never appear here.
@@ -464,6 +502,7 @@ private fun WeekRow(e: Event, modifier: Modifier = Modifier) {
                 val room = e.room
                 if (room != null) Text(room, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (LocalUnconfirmed.current) Text("\u26A0 Unconfirmed", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+                if (e.startMillis.toLocal().toLocalDate() == LocalDate.now(zone)) MarkLabel(LocalAttendance.current?.markFor(e))
             }
         }
     }
@@ -612,7 +651,8 @@ private fun HeroCountdown(startMillis: Long, fg: Color) {
 @Composable
 private fun TimelineRow(e: Event, now: Long, first: Boolean, last: Boolean, modifier: Modifier = Modifier) {
     val accent = paletteColor(e.colorIndex())
-    val live = now >= e.startMillis
+    val ended = (e.endMillis ?: Long.MAX_VALUE) <= now
+    val live = now >= e.startMillis && !ended
     val rail = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)
     val start = e.startMillis.toLocal()
     Row(modifier.height(IntrinsicSize.Min)) {
@@ -643,9 +683,12 @@ private fun TimelineRow(e: Event, now: Long, first: Boolean, last: Boolean, modi
                     e.room?.let { Text("📍 $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     e.faculty?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     if (LocalUnconfirmed.current) Text("\u26A0 Unconfirmed", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary)
+                    if (e.startMillis.toLocal().toLocalDate() == LocalDate.now(zone)) MarkLabel(LocalAttendance.current?.markFor(e))
                 }
                 Spacer(Modifier.width(8.dp))
-                if (live) {
+                if (ended) {
+                    Text("Done", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (live) {
                     Text("LIVE", style = MaterialTheme.typography.labelSmall, color = Color.White,
                         modifier = Modifier.clip(CircleShape).background(accent).padding(horizontal = 10.dp, vertical = 5.dp))
                 } else {
@@ -695,12 +738,38 @@ private fun TimetableBanner(expired: Boolean, since: Long, onSignIn: () -> Unit,
             style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onTertiaryContainer,
         )
         Text(
-            if (expired) "Your classes below were last confirmed on $date and may be out of date. Your alarms keep working."
+            if (expired) "Showing your last known timetable and attendance, confirmed on $date. Your alarms keep working. Tap to reconnect Amizone."
             else "Showing your classes as last confirmed on $date. Your alarms keep working.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer,
         )
         androidx.compose.material3.TextButton(onClick = if (expired) onSignIn else onRetry) {
-            Text(if (expired) "Sign in" else "Try again", color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.labelLarge)
+            Text(if (expired) "Reconnect Amizone" else "Try again", color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.labelLarge)
         }
+    }
+}
+
+/** On the home screen: overall attendance at a glance, and what needs a look. Opens the Attendance screen. */
+@Composable
+private fun AttendanceCard(snap: AttSnapshot?, failure: String?, expired: Boolean, onClick: () -> Unit) {
+    val ctx = LocalContext.current
+    val watch = snap?.counted?.count { ctx.zoneOf(it) != Zone.GREEN } ?: 0
+    val z = snap?.takeIf { it.total > 0 }?.let { AttMath.zone(it.attended, it.total, ctx.attGreen, ctx.attYellow) }
+    Row(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).background(MaterialTheme.colorScheme.surfaceContainerLow).clickable(onClick = onClick).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Attendance", style = MaterialTheme.typography.titleMedium)
+            Text(
+                when {
+                    snap == null -> if (expired) "Tap to reconnect Amizone" else "Tap to load your attendance"
+                    failure == "format" -> "Couldn't be read right now. Last numbers from ${AttendanceSync.updatedText(snap.updatedAt)}"
+                    watch == 0 -> "Every subject is in the green"
+                    else -> "$watch subject${if (watch == 1) "" else "s"} to watch"
+                },
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (snap != null && z != null) Text(AttMath.percent(snap.attended, snap.total) + "%", style = MaterialTheme.typography.headlineSmall, color = zoneColor(z))
     }
 }

@@ -41,6 +41,17 @@ class TimersWidget : AppWidgetProvider() {
     override fun onDeleted(ctx: Context, ids: IntArray) = WidgetPrefs.remove(ctx, ids)
 }
 
+/** Attendance widget: today's classes and whether each was marked, plus any subject in yellow or red. Tap the header to refresh. */
+class AttendanceWidget : AppWidgetProvider() {
+    override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) = async { Scheduler.refreshWidget(ctx) }
+    override fun onDeleted(ctx: Context, ids: IntArray) = WidgetPrefs.remove(ctx, ids)
+    override fun onReceive(ctx: Context, intent: Intent) {
+        if (intent.action == ACTION_ATT_REFRESH) async { AttendanceWakeups.widgetTap(ctx) } else super.onReceive(ctx, intent)
+    }
+}
+
+const val ACTION_ATT_REFRESH = "com.rishabh.clockdown.ATT_REFRESH"
+
 /** Each placed widget instance has its own settings, keyed by its appWidgetId. */
 object WidgetPrefs {
     // Timer widget
@@ -397,12 +408,113 @@ object Widgets {
         return listView(ctx, events, header, empty, style, now, Scheduler.openApp(ctx))
     }
 
+    // ---------------------------------------------------------------- Attendance widget
+
+    class AttRow(val emoji: String, val title: String, val sub: String, val accent: Int)
+
+    /** What the Attendance widget says, worked out once so the real widget, its preview and the tests agree. */
+    class AttModel(val header: String, val rows: List<AttRow>, val empty: String, val signIn: Boolean)
+
+    private fun dot(z: Zone) = when (z) { Zone.GREEN -> "🟢"; Zone.YELLOW -> "🟡"; Zone.RED -> "🔴" }
+
+    fun attModel(ctx: Context, snap: AttSnapshot?, todays: List<Event>, max: Int = ROWS): AttModel {
+        val expired = ctx.sessionExpired
+        if (!ctx.amizoneConnected && snap == null) return AttModel("Attendance", emptyList(), "Open Clockdown and sign in to Amizone", false)
+        val updated = AttendanceSync.updatedText(snap?.updatedAt ?: 0L)
+        val head = when {
+            ctx.prefs.getBoolean("attRefreshing", false) -> "↻ Refreshing…"
+            expired -> "Reconnect Amizone · last $updated"
+            snap == null -> "↻ Tap to load attendance"
+            ctx.attFailure != null -> "↻ Attendance · ⚠ not refreshed · last $updated"
+            else -> "↻ Attendance ${AttMath.percent(snap.attended, snap.total)}% · $updated"
+        }
+        if (snap == null) return AttModel(head, emptyList(), if (expired) "Sign in again to see attendance" else "No attendance yet", expired)
+
+        // Today's classes, one row per course (back-to-back periods are one row), in time order.
+        val timeF = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
+        val classRows = todays.groupBy { it.courseCode }.values.sortedBy { it.first().startMillis }.map { group ->
+            val marks = group.map { snap.markFor(it) }
+            val e = group.first()
+            val label = when {
+                marks.all { it == null } -> null
+                marks.distinct().size > 1 -> "Partly marked"
+                else -> when (marks.first()) { ClassMark.PRESENT -> "Present"; ClassMark.OD -> "Present (OD)"; ClassMark.ABSENT -> "Absent"; else -> "Not marked yet" }
+            }
+            val emoji = when {
+                label == null -> "📘"
+                marks.any { it == ClassMark.ABSENT } -> "❌"
+                marks.all { it == ClassMark.PRESENT || it == ClassMark.OD } -> "✅"
+                else -> "⏳"
+            }
+            val c = snap.course(e.courseCode)?.takeIf { it.tracked && it.total > 0 }
+            val z = c?.let { ctx.zoneOf(it) }
+            val time = e.startMillis.toLocal().format(timeF).lowercase()
+            AttRow(emoji, e.title(), listOfNotNull(time, label, z?.takeIf { it != Zone.GREEN }?.let { "${dot(it)} ${AttMath.percent(c.attended, c.total)}%" }).joinToString(" · "), e.colorIndex())
+        }
+        val todayCodes = todays.mapNotNull { it.courseCode?.lowercase() }.toSet()
+        val risk = snap.counted.filter { ctx.zoneOf(it) != Zone.GREEN && it.code.lowercase() !in todayCodes }.sortedByDescending { ctx.zoneOf(it) }.map { c ->
+            val z = ctx.zoneOf(c)
+            AttRow(dot(z), titleCase(c.name), "${AttMath.percent(c.attended, c.total)}% · ${attendanceAdvice(ctx, c)}",
+                Math.floorMod(c.code.hashCode(), PALETTE_SIZE))
+        }
+        // Keep a slot for the worst subject that isn't in today's list, so trouble never hides behind a long day.
+        val todayShown = classRows.take(if (risk.isEmpty()) max else max - 1)
+        val rows = (todayShown + risk).take(max)
+        val hidden = classRows.size + risk.size - rows.size
+        return AttModel(if (hidden > 0) "$head · +$hidden more" else head, rows,
+            if (classRows.isEmpty()) "No classes today, and every subject is green 🎉" else "", false)
+    }
+
+    fun attendanceView(
+        ctx: Context, m: AttModel, style: WidgetStyle, open: PendingIntent?, headerTap: PendingIntent?,
+        light: Boolean = Wallpaper.isLight(ctx),
+    ): RemoteViews {
+        val look = Looks.of(ctx, style, 0, light)
+        val v = RemoteViews(ctx.packageName, Looks.layout(Kind.ATTENDANCE, look.variant))
+        if (open != null) v.setOnClickPendingIntent(R.id.troot, open)
+        if (headerTap != null) v.setOnClickPendingIntent(R.id.theader, headerTap)
+        v.bg(R.id.troot, look.containerBg)
+        v.setViewVisibility(R.id.theader, View.VISIBLE)
+        v.setTextViewText(R.id.theader, m.header)
+        v.setTextColor(R.id.theader, look.containerFg)
+        v.setViewVisibility(R.id.tempty, vis(m.rows.isEmpty()))
+        v.setTextViewText(R.id.tempty, m.empty)
+        v.setTextColor(R.id.tempty, look.containerFg)
+        rows.forEachIndexed { i, row ->
+            val r = m.rows.getOrNull(i)
+            v.setViewVisibility(row.root, if (r != null) View.VISIBLE else if (m.rows.isEmpty()) View.GONE else View.INVISIBLE)
+            v.setViewVisibility(row.chrono, View.GONE) // the list layouts' countdown slot isn't used here
+            if (r == null) return@forEachIndexed
+            val rowLook = Looks.of(ctx, style, r.accent, light)
+            val fg = Looks.rowFg(ctx, style, r.accent, light)
+            v.bg(row.root, rowLook.rowBg(r.accent))
+            v.badge(row.emoji, fg == Color.WHITE)
+            v.setTextViewText(row.emoji, r.emoji)
+            v.setTextViewText(row.name, r.title)
+            v.setTextColor(row.name, fg)
+            v.setTextViewText(row.sub, r.sub)
+            v.setTextColor(row.sub, soft(fg))
+        }
+        return v
+    }
+
+    fun attendance(ctx: Context, id: Int, now: Long): RemoteViews {
+        val dayStart = LocalDate.now(AMIZONE_ZONE).atStartOfDay(AMIZONE_ZONE).toInstant().toEpochMilli()
+        val m = attModel(ctx, AttendanceStore.load(ctx), AppDb.get(ctx).classesBetween(dayStart, dayStart + DAY_MS))
+        val refresh = PendingIntent.getBroadcast(
+            ctx, 79, Intent(ctx, AttendanceWidget::class.java).setAction(ACTION_ATT_REFRESH), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val reconnect = PendingIntent.getActivity(ctx, 80, Intent(ctx, LoginActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        return attendanceView(ctx, m, WidgetPrefs.style(ctx, id) ?: Defaults.classStyle, Scheduler.openAttendance(ctx), if (m.signIn) reconnect else refresh)
+    }
+
     /** Refreshes every placed instance of every widget. Call from a background thread. */
     fun updateAll(ctx: Context, upcoming: List<Event>, now: Long) {
         val mgr = AppWidgetManager.getInstance(ctx)
         for (id in mgr.getAppWidgetIds(ComponentName(ctx, ClockdownWidget::class.java))) mgr.updateAppWidget(id, timer(ctx, id, upcoming, now))
         for (id in mgr.getAppWidgetIds(ComponentName(ctx, ClassesWidget::class.java))) mgr.updateAppWidget(id, classes(ctx, id, upcoming, now))
         for (id in mgr.getAppWidgetIds(ComponentName(ctx, TimersWidget::class.java))) mgr.updateAppWidget(id, list(ctx, id, upcoming, now))
+        for (id in mgr.getAppWidgetIds(ComponentName(ctx, AttendanceWidget::class.java))) mgr.updateAppWidget(id, attendance(ctx, id, now))
     }
 
     /** Android 15+: show real content (not a grey placeholder) in the widget picker. Rate-limited by the system, so best effort. */
@@ -416,6 +528,7 @@ object Widgets {
             mgr.setWidgetPreview(ComponentName(ctx, ClockdownWidget::class.java), home, timer(ctx, PREVIEW_ID, upcoming, now))
             mgr.setWidgetPreview(ComponentName(ctx, ClassesWidget::class.java), home, classes(ctx, PREVIEW_ID, upcoming, now))
             mgr.setWidgetPreview(ComponentName(ctx, TimersWidget::class.java), home, list(ctx, PREVIEW_ID, upcoming, now))
+            mgr.setWidgetPreview(ComponentName(ctx, AttendanceWidget::class.java), home, attendance(ctx, PREVIEW_ID, now))
         }
     }
 }
