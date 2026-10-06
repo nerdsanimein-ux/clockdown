@@ -19,3 +19,10 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# Shrink only. Names are kept so crash reports (Sentry) stay readable without uploading a mapping file every release.
+-dontobfuscate
+-keepattributes SourceFile,LineNumberTable
+
+# Tink (the encrypted session storage) names a few annotation-only classes it does not ship, and its protobuf reads message fields by reflection.
+-dontwarn com.google.errorprone.annotations.**
+-keepclassmembers class * extends com.google.crypto.tink.shaded.protobuf.GeneratedMessageLite { <fields>; }

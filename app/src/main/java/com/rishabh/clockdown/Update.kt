@@ -1,5 +1,9 @@
 package com.rishabh.clockdown
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -78,6 +82,18 @@ fun cleanNotes(md: String): String = md.lines().dropWhile { it.isBlank() }.let {
         else -> t
     }.replace("**", "").replace("`", "")
 }.replace(Regex("\n{3,}"), "\n\n").trim()
+
+/** A few lines of the notes for a dialog: at most [maxLines] lines, each cut short, with "...and more" if there was more. */
+fun notesSummary(md: String, maxLines: Int = 5, maxChars: Int = 110): String {
+    val lines = cleanNotes(md).lines().filter { it.isNotBlank() }
+    val shown = lines.take(maxLines).map { if (it.length > maxChars) it.take(maxChars - 1).trimEnd() + "…" else it }
+    return (if (lines.size > maxLines) shown + "…and more" else shown).joinToString("\n")
+}
+
+/** The update dialog on app open is shown at most once in this long, however it was closed. */
+const val UPDATE_PROMPT_GAP_MS = 24 * 60 * 60 * 1000L
+
+fun updatePromptDue(lastShown: Long, now: Long) = now - lastShown >= UPDATE_PROMPT_GAP_MS
 
 enum class CheckResult { UPDATE, CURRENT, OFFLINE, LIMITED }
 
@@ -195,7 +211,22 @@ object UpdateChecker {
     fun available(ctx: Context): UpdateInfo? = engine(ctx).available()
     fun lastChecked(ctx: Context) = engine(ctx).lastChecked()
     fun forget(ctx: Context) = engine(ctx).forget()
-    fun check(ctx: Context, mode: CheckMode): CheckResult = engine(ctx).check(mode)
+    fun check(ctx: Context, mode: CheckMode): CheckResult {
+        // Debug builds only: a faked release (see DebugHooks) must not be wiped by the real GitHub answer. Dead code in release.
+        if (BuildConfig.DEBUG && ctx.prefs.getBoolean("debugFakeUpdate", false)) return if (available(ctx) != null) CheckResult.UPDATE else CheckResult.CURRENT
+        return engine(ctx).check(mode)
+    }
+
+    /** True if the dialog on app open may be shown now (not within a day of the last time). */
+    fun promptDue(ctx: Context) = updatePromptDue(ctx.prefs.getLong("updPromptAt", 0), System.currentTimeMillis())
+
+    /** Called when the dialog is shown, not when it is dismissed, so "Later", tapping outside and a killed app all count the same. */
+    fun markPrompted(ctx: Context) = ctx.prefs.edit().putLong("updPromptAt", System.currentTimeMillis()).apply()
+
+    /** The daily background run: look for a release and, if there's a new one, tell the person once. */
+    fun dailyRun(ctx: Context) {
+        if (check(ctx, CheckMode.AUTO) == CheckResult.UPDATE) UpdateNotice.notifyOnce(ctx)
+    }
 
     /** Once a day, when there's a connection. The result is only cached; the Settings badge reads the cache. */
     fun scheduleDaily(ctx: Context) {
@@ -207,9 +238,39 @@ object UpdateChecker {
 
 class UpdateWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     override fun doWork(): Result {
-        UpdateChecker.check(applicationContext, CheckMode.AUTO)
+        UpdateChecker.dailyRun(applicationContext)
         return Result.success() // no retry: the next daily run is soon enough
     }
+}
+
+/** The "new version" notification: its own channel, its own switch in Settings, and one notification per version, ever. */
+object UpdateNotice {
+    private const val CH = "updates"
+    private const val ID = 4_000_000 // sign-in is 1M, attendance 2M and 3M; event notifications use small numbers
+    /** Set on the intent a tap on the notification starts MainActivity with, so the update dialog opens at once. */
+    const val EXTRA_SHOW_UPDATE = "showUpdate"
+
+    fun enabled(ctx: Context) = ctx.prefs.getBoolean("updNotify", true)
+
+    fun notifyOnce(ctx: Context) {
+        val info = UpdateChecker.available(ctx) ?: return
+        val p = ctx.prefs
+        if (!enabled(ctx) || p.getInt("updNotifiedCode", 0) >= info.versionCode) return
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        if (!nm.areNotificationsEnabled()) return // not recorded, so it can still go out if they allow notifications later
+        p.edit().putInt("updNotifiedCode", info.versionCode).apply()
+        nm.createNotificationChannel(NotificationChannel(CH, "App updates", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.notify(ID, Notification.Builder(ctx, CH)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("Clockdown ${info.versionName} is available").setContentText("Tap to update.")
+            .setContentIntent(PendingIntent.getActivity(ctx, ID, // ID as the request code: 78 is already openAttendance's, and equal-looking PendingIntents would merge
+                Intent(ctx, MainActivity::class.java).putExtra(EXTRA_SHOW_UPDATE, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            .setAutoCancel(true).build())
+    }
+
+    /** Once the app is up to date (or the release was withdrawn) the notification has nothing left to say. */
+    fun cancel(ctx: Context) = ctx.getSystemService(NotificationManager::class.java).cancel(ID)
 }
 
 sealed interface Download {

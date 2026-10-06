@@ -18,6 +18,9 @@
                 <action android:name="com.rishabh.clockdown.DEBUG_ATT_REWIND" />
                 <action android:name="com.rishabh.clockdown.DEBUG_ALARM" />
                 <action android:name="com.rishabh.clockdown.DEBUG_SENTRY_TEST" />
+                <action android:name="com.rishabh.clockdown.DEBUG_FAKE_UPDATE" />
+                <action android:name="com.rishabh.clockdown.DEBUG_UPDATE_RUN" />
+                <action android:name="com.rishabh.clockdown.DEBUG_KEEPALIVE" />
             </intent-filter>
         </receiver>
 

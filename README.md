@@ -19,7 +19,9 @@ Clockdown counts down to the things you don't want to miss, so you can stop chec
 
 **Android shows a warning?** That's normal for any app that doesn't come from the Play Store; it's about where the app came from, not what it does. If you see "Blocked by Play Protect" or "Harmful app", tap **More details** (or the small arrow), then **Install anyway**. If Android offers to scan the app first, you can tap **Scan**. The same steps are in the app under **Settings > How to install**.
 
-**Updating:** after the first install, Clockdown checks for new versions by itself. When one is ready, a dot appears on the Settings button; open **Settings → Check for updates** and tap **Download**.
+**Updating:** after the first install, Clockdown checks for new versions by itself. When one is ready it shows a short "Clockdown X is available" box when you open the app (at most once a day; **Later** hides it for a day), sends one notification per version (switch it off in **Settings → About and updates**), and puts a dot on the Settings button. You can always open **Settings → Check for updates** and tap **Update now**.
+
+**Staying signed in to Amizone:** Amizone's sign-in only lasts about 2½ hours unless it's used, so between 7 am and 11 pm Clockdown makes one tiny request roughly every 2 hours to keep it renewed. Overnight it does nothing; if Android delays it (battery savers) or the sign-in lapses, the one-tap reconnect still works.
 
 ## For developers
 

@@ -145,7 +145,7 @@ internal fun Event.subtitle(): String {
  * exact widget instead of asking "add to home screen?" (it's already going there).
  */
 @Composable
-fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boolean = false) {
+fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boolean = false, openUpdate: Boolean = false) {
     val ctx = LocalContext.current
     val dao = remember { AppDb.get(ctx) }
     val scope = rememberCoroutineScope()
@@ -163,6 +163,9 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
     var addWidgetOpen by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableIntStateOf(if (openAttendance) 1 else 0) } // 0 = Home, 1 = Attendance
     var attSyncing by remember { mutableStateOf(false) }
+    var updatePrompt by remember { mutableStateOf<UpdateInfo?>(null) } // the "new version" dialog shown on app open
+    var updateChecks by remember { mutableIntStateOf(0) }              // bumped after every finished update check
+    var updateTapUsed by remember { mutableStateOf(false) }
     // null while we check whether this is a first run; nothing is asked of the person until then.
     var onboarding by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(Unit) { onboarding = withContext(Dispatchers.IO) { Onboarding.needed(ctx) } }
@@ -203,9 +206,19 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
             withContext(Dispatchers.IO) {
                 UpdateChecker.check(ctx, if (UpdateChecker.available(ctx) != null) CheckMode.REVALIDATE else CheckMode.AUTO)
             }
-            tick++
+            if (UpdateChecker.available(ctx) == null) UpdateNotice.cancel(ctx)
+            tick++; updateChecks++
         }
     }
+    // Offer a newer version, only once a check has finished (so a withdrawn release is never offered) and the welcome flow is over.
+    // At most once a day; tapping the notification is the person asking for it, so that one is shown regardless.
+    LaunchedEffect(onboarding, updateChecks) {
+        if (onboarding != false || updatePrompt != null) return@LaunchedEffect
+        val info = UpdateChecker.available(ctx) ?: return@LaunchedEffect
+        val tapped = openUpdate && !updateTapUsed
+        if (tapped || UpdateChecker.promptDue(ctx)) { updateTapUsed = true; UpdateChecker.markPrompted(ctx); updatePrompt = info }
+    }
+    updatePrompt?.let { UpdateDialog(it) { updatePrompt = null; tick++ } }
     val updateReady = remember(tick) { UpdateChecker.available(ctx) != null }
 
     var batteryDialog by remember { mutableStateOf(false) }

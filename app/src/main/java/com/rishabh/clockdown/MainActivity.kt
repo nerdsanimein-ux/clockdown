@@ -15,7 +15,8 @@ class MainActivity : ComponentActivity() {
         val editEventId = intent.getIntExtra(EXTRA_EDIT_EVENT, -1).takeIf { it >= 0 }
         val bindWidgetId = intent.getIntExtra(EXTRA_BIND_WIDGET, -1).takeIf { it >= 0 }
         val openAttendance = intent.getBooleanExtra(EXTRA_OPEN_ATTENDANCE, false)
-        setContent { ClockdownTheme { App(editEventId, bindWidgetId, openAttendance) } }
+        val openUpdate = intent.getBooleanExtra(UpdateNotice.EXTRA_SHOW_UPDATE, false)
+        setContent { ClockdownTheme { App(editEventId, bindWidgetId, openAttendance, openUpdate) } }
         // WorkManager's enqueue is a database write; off the main thread so it can't delay the first frame.
         thread {
             if (amizoneConnected) AmizoneSync.schedulePeriodic(applicationContext)

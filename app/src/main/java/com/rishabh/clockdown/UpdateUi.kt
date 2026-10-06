@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -81,6 +82,11 @@ fun UpdatesGroup() {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Version", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             Text(UpdateChecker.installedName(ctx), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        var notify by remember { mutableStateOf(UpdateNotice.enabled(ctx)) }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Tell me when a new version is out", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Switch(notify, { notify = it; ctx.prefs.edit().putBoolean("updNotify", it).apply() })
         }
         Row(
             Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
@@ -153,18 +159,17 @@ fun UpdateDialog(info: UpdateInfo, onClose: () -> Unit) {
     when (val p = phase) {
         Phase.Offer -> AlertDialog(
             onDismissRequest = onClose,
-            title = { Text("Update available") },
+            title = { Text("Clockdown ${info.versionName} is available") },
             text = {
                 Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Version ${info.versionName}", style = MaterialTheme.typography.titleMedium)
-                    val notes = cleanNotes(info.notes)
+                    val notes = notesSummary(info.notes)
                     if (notes.isNotBlank()) {
                         Text("What's new", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                         Text(notes, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { start() }) { Text("Download") } },
+            confirmButton = { TextButton(onClick = { start() }) { Text("Update now") } },
             dismissButton = { TextButton(onClick = onClose) { Text("Later") } },
         )
 

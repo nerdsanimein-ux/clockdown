@@ -178,6 +178,20 @@ object AmizoneSync {
         return SyncResult.OK
     }
 
+    /**
+     * Keeps the sign-in alive: Amizone sends a fresh cookie with any ordinary reply, and the sign-in only lasts about 150
+     * minutes without one. ONE small request (today's timetable, read and thrown away), and only the renewed cookie is kept.
+     * It never touches the timetable, never notifies, and a failure or a dead sign-in is left for the normal sync to deal with.
+     */
+    @Synchronized
+    fun keepAlive(ctx: Context) {
+        if (ctx.sessionExpired) return
+        val cookies = Session.cookies(ctx) ?: return
+        val ua = Session.userAgent(ctx) ?: WebSettings.getDefaultUserAgent(ctx)
+        val r = try { fetchDay(LocalDate.now(IST), cookies, ua) } catch (e: IOException) { return }
+        if (SessionCheck.classify(r.code, r.contentType, r.body) == Verdict.OK) Session.renew(ctx, r.setCookies)
+    }
+
     private fun fetchDay(day: LocalDate, cookies: String, ua: String): Reply =
         fetch("/Calendar/home/GetDiaryEvents", mapOf("start" to day.toString(), "end" to day.plusDays(1).toString()), cookies, ua, xhr = true, json = true)
 
@@ -236,6 +250,7 @@ object AmizoneSync {
         ctx.prefs.edit().remove("lastSync").remove("lastJson").remove("unconfirmed").remove("sessionExpired").apply()
         AttendanceStore.clear(ctx)
         WorkManager.getInstance(ctx).cancelUniqueWork("amizone")
+        WorkManager.getInstance(ctx).cancelUniqueWork("amizone-keepalive")
         ctx.getSystemService(NotificationManager::class.java).cancel(SIGN_IN_ID)
         AppDb.get(ctx).deleteAmizone().forEach { Scheduler.cancel(ctx, it) }
         Scheduler.rescheduleAll(ctx)
@@ -252,6 +267,21 @@ object AmizoneSync {
         val req = PeriodicWorkRequestBuilder<SyncWorker>(6, TimeUnit.HOURS)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
         WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("amizone", ExistingPeriodicWorkPolicy.KEEP, req)
+        // The sign-in keep-alive is tied to being signed in, same as the sync above, so both are started from the same places.
+        val keep = PeriodicWorkRequestBuilder<KeepAliveWorker>(2, TimeUnit.HOURS)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+        WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("amizone-keepalive", ExistingPeriodicWorkPolicy.KEEP, keep)
+    }
+}
+
+/** When the keep-alive may run: from 7:00 up to (not including) 23:00, Amizone time. Overnight it does nothing. */
+fun keepAliveWindow(t: java.time.LocalTime) = t.hour in 7..22
+
+class KeepAliveWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
+    // Android may run this late (Doze, strict battery savers); that's fine, the one-tap reconnect is the fallback.
+    override fun doWork(): Result {
+        if (keepAliveWindow(java.time.LocalTime.now(AMIZONE_ZONE))) AmizoneSync.keepAlive(applicationContext)
+        return Result.success()
     }
 }
 
