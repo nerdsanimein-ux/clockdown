@@ -41,3 +41,9 @@ change silently locks out everyone already on the app. Before publishing any new
 
 Never release if either check fails. Never work around a signature mismatch by asking a student to uninstall and
 reinstall — that should be a last-resort fix for a one-off broken device, not the default plan for a release.
+
+## Don't change things unasked
+
+Never change build configuration (code shrinking, dependencies, signing, minSdk/targetSdk, build types) or do extra
+work that wasn't asked for without asking first. If you think something is needed, propose it in the report and wait
+for approval.
