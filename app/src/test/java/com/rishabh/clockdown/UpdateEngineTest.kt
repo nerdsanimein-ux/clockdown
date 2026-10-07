@@ -38,10 +38,64 @@ class UpdateEngineTest {
     private fun release(tag: String) =
         """{"tag_name":"$tag","name":"Clockdown $tag","body":"Notes","assets":[{"name":"clockdown.apk","size":5,"browser_download_url":"${server.url("/dl/clockdown.apk")}"}]}"""
 
-    private fun engine() = UpdateEngine(OkHttpClient(), server.url("/").toString().trimEnd('/'), store, { installed }, { clock })
+    // The release web page. Unless a test queues an answer, it answers 500, so the engine falls back to the API.
+    private lateinit var web: MockWebServer
 
-    @Before fun start() { server = MockWebServer().also { it.start() } }
-    @After fun stop() { server.close() }
+    private fun engine() = UpdateEngine(
+        OkHttpClient(), server.url("/").toString().trimEnd('/'), store, { installed }, { clock }, web.url("/").toString().trimEnd('/'),
+    )
+
+    private fun latestPageSays(tag: String) =
+        web.enqueue(MockResponse.Builder().code(302).addHeader("Location", "https://github.com/x/y/releases/tag/$tag").build())
+
+    @Before fun start() {
+        server = MockWebServer().also { it.start() }
+        web = MockWebServer().also { it.start(); (it.dispatcher as mockwebserver3.QueueDispatcher).setFailFast(MockResponse.Builder().code(500).build()) }
+    }
+    @After fun stop() { server.close(); web.close() }
+
+    @Test
+    fun whenTheLatestTagIsNotNewerTheApiIsNeverAsked() {
+        installed = 9
+        repeat(3) { latestPageSays("9"); assertEquals(CheckResult.CURRENT, engine().check(CheckMode.REVALIDATE)) }
+        assertEquals(0, server.requestCount)
+        assertEquals(3, web.requestCount)
+    }
+
+    @Test
+    fun aNewTagCostsOneApiRequestAndRepeatChecksCostNone() {
+        installed = 9
+        latestPageSays("10")
+        server.enqueue(MockResponse.Builder().code(200).body(release("10")).build())
+        assertEquals(CheckResult.UPDATE, engine().check(CheckMode.REVALIDATE))
+        repeat(3) { latestPageSays("10"); assertEquals(CheckResult.UPDATE, engine().check(CheckMode.REVALIDATE)) }
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun aWithdrawnReleaseIsForgottenFromTheLatestTagAlone() {
+        installed = 9
+        latestPageSays("10")
+        server.enqueue(MockResponse.Builder().code(200).body(release("10")).build())
+        engine().check(CheckMode.MANUAL)
+        latestPageSays("9") // release 10 was deleted; the newest is the one we have
+        assertEquals(CheckResult.CURRENT, engine().check(CheckMode.REVALIDATE))
+        assertNull(store.getString("updRelease"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun anUnexpectedLatestPageFallsBackToTheApi() {
+        installed = 9
+        web.enqueue(MockResponse.Builder().code(200).body("<html>changed</html>").build())
+        server.enqueue(MockResponse.Builder().code(200).body(release("10")).build())
+        assertEquals(CheckResult.UPDATE, engine().check(CheckMode.REVALIDATE))
+        web.enqueue(MockResponse.Builder().code(302).addHeader("Location", "https://github.com/login").build())
+        server.enqueue(MockResponse.Builder().code(304).build())
+        assertEquals(CheckResult.UPDATE, engine().check(CheckMode.REVALIDATE))
+        // (the page failing outright, the default answer here, is every other test in this file)
+        assertEquals(2, server.requestCount)
+    }
 
     @Test
     fun aNewerReleaseIsOfferedAndCached() {

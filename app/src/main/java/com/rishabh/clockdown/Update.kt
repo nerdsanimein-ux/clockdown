@@ -118,6 +118,7 @@ class UpdateEngine(
     private val store: UpdateStore,
     private val installedCode: () -> Int,
     private val now: () -> Long = System::currentTimeMillis,
+    private val webUrl: String = "https://github.com",
 ) {
     private fun cached(): UpdateInfo? = store.getString("updRelease")?.let(::parseRelease)
 
@@ -132,8 +133,23 @@ class UpdateEngine(
     private fun result() = if (available() != null) CheckResult.UPDATE else CheckResult.CURRENT
 
     /**
-     * Blocking; call off the main thread. Answers within the freshness window come from the cache; otherwise one request
-     * is made, conditional on the ETag, which GitHub doesn't count against its anonymous limit of 60 requests an hour.
+     * The newest release's tag, read from where GitHub's public "latest release" web page redirects to (.../releases/tag/9).
+     * Unlike the API this isn't counted against the 60 requests an hour per network that the API allows. Null if the page
+     * answers with anything unexpected, in which case the caller asks the API instead.
+     */
+    private fun latestTag(): Int? = try {
+        http.newBuilder().followRedirects(false).build()
+            .newCall(Request.Builder().url("$webUrl/$UPDATE_REPO/releases/latest").header("User-Agent", "Clockdown-Updater").build())
+            .execute().use { r ->
+                if (!r.isRedirect) null
+                else Regex("/releases/tag/[vV]?(\\d+)$").find(r.header("Location").orEmpty())?.groupValues?.get(1)?.toIntOrNull()
+            }
+    } catch (e: IOException) { null }
+
+    /**
+     * Blocking; call off the main thread. Answers within the freshness window come from the cache; otherwise the newest tag
+     * is read from the release web page (see [latestTag]), and only a new, unseen tag costs an API request (conditional on the
+     * ETag, which saves data; GitHub still counts it). If the web page can't be read, the API is asked every time.
      */
     @Synchronized
     fun check(mode: CheckMode): CheckResult {
@@ -142,6 +158,16 @@ class UpdateEngine(
 
         val window = if (mode == CheckMode.MANUAL) MANUAL_FRESH_MS else 0L
         if (window > 0 && now() - lastChecked() < window) return result()
+
+        // The cheap question first: what is the newest tag? Only a tag newer than the installed version that we don't already
+        // hold the details of needs the API.
+        latestTag()?.let { tag ->
+            if (tag <= installedCode()) forget()
+            if (tag <= installedCode() || available()?.versionCode == tag) {
+                store.edit { putLong("updCheckedAt", now()) }
+                return result()
+            }
+        }
 
         val req = Request.Builder()
             .url("$baseUrl/repos/$UPDATE_REPO/releases/latest")
