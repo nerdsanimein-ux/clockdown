@@ -280,7 +280,10 @@ fun keepAliveWindow(t: java.time.LocalTime) = t.hour in 7..22
 class KeepAliveWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     // Android may run this late (Doze, strict battery savers); that's fine, the one-tap reconnect is the fallback.
     override fun doWork(): Result {
-        if (keepAliveWindow(java.time.LocalTime.now(AMIZONE_ZONE))) AmizoneSync.keepAlive(applicationContext)
+        if (keepAliveWindow(java.time.LocalTime.now(AMIZONE_ZONE))) {
+            UpdateChecker.backgroundRun(applicationContext) // also looks for a new app version, so its notification is at most ~2 hours late
+            AmizoneSync.keepAlive(applicationContext)
+        }
         return Result.success()
     }
 }

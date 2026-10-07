@@ -90,15 +90,10 @@ fun notesSummary(md: String, maxLines: Int = 5, maxChars: Int = 110): String {
     return (if (lines.size > maxLines) shown + "…and more" else shown).joinToString("\n")
 }
 
-/** The update dialog on app open is shown at most once in this long, however it was closed. */
-const val UPDATE_PROMPT_GAP_MS = 24 * 60 * 60 * 1000L
-
-fun updatePromptDue(lastShown: Long, now: Long) = now - lastShown >= UPDATE_PROMPT_GAP_MS
-
 enum class CheckResult { UPDATE, CURRENT, OFFLINE, LIMITED }
 
 /** How eagerly to ask GitHub. [REVALIDATE] always asks (cheaply, with an ETag) and is used before offering a download. */
-enum class CheckMode { AUTO, MANUAL, REVALIDATE }
+enum class CheckMode { MANUAL, REVALIDATE }
 
 /** Where the update state is kept. A tiny interface so the logic below can be tested without an Android device. */
 interface UpdateStore {
@@ -145,7 +140,7 @@ class UpdateEngine(
         // A cached release that isn't newer than the installed version (e.g. we just updated to it) is stale.
         if (store.getString("updRelease") != null && available() == null) forget()
 
-        val window = when (mode) { CheckMode.AUTO -> AUTO_FRESH_MS; CheckMode.MANUAL -> MANUAL_FRESH_MS; CheckMode.REVALIDATE -> 0L }
+        val window = if (mode == CheckMode.MANUAL) MANUAL_FRESH_MS else 0L
         if (window > 0 && now() - lastChecked() < window) return result()
 
         val req = Request.Builder()
@@ -180,8 +175,7 @@ class UpdateEngine(
     }
 
     companion object {
-        const val AUTO_FRESH_MS = 12 * 60 * 60 * 1000L // background checks reuse a result younger than this
-        const val MANUAL_FRESH_MS = 60 * 1000L         // "Check for updates" never asks GitHub more than once a minute
+        const val MANUAL_FRESH_MS = 60 * 1000L // no check asks GitHub more than once a minute, so a new release is seen on the next open
     }
 }
 
@@ -217,18 +211,12 @@ object UpdateChecker {
         return engine(ctx).check(mode)
     }
 
-    /** True if the dialog on app open may be shown now (not within a day of the last time). */
-    fun promptDue(ctx: Context) = updatePromptDue(ctx.prefs.getLong("updPromptAt", 0), System.currentTimeMillis())
-
-    /** Called when the dialog is shown, not when it is dismissed, so "Later", tapping outside and a killed app all count the same. */
-    fun markPrompted(ctx: Context) = ctx.prefs.edit().putLong("updPromptAt", System.currentTimeMillis()).apply()
-
-    /** The daily background run: look for a release and, if there's a new one, tell the person once. */
-    fun dailyRun(ctx: Context) {
-        if (check(ctx, CheckMode.AUTO) == CheckResult.UPDATE) UpdateNotice.notifyOnce(ctx)
+    /** The background run: look for a release and, if there's a new one, tell the person once. */
+    fun backgroundRun(ctx: Context) {
+        if (check(ctx, CheckMode.MANUAL) == CheckResult.UPDATE) UpdateNotice.notifyOnce(ctx)
     }
 
-    /** Once a day, when there's a connection. The result is only cached; the Settings badge reads the cache. */
+    /** Once a day, when there's a connection (the keep-alive job does the same check every ~2 hours while signed in). */
     fun scheduleDaily(ctx: Context) {
         val req = PeriodicWorkRequestBuilder<UpdateWorker>(24, TimeUnit.HOURS)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
@@ -238,24 +226,20 @@ object UpdateChecker {
 
 class UpdateWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     override fun doWork(): Result {
-        UpdateChecker.dailyRun(applicationContext)
+        UpdateChecker.backgroundRun(applicationContext)
         return Result.success() // no retry: the next daily run is soon enough
     }
 }
 
-/** The "new version" notification: its own channel, its own switch in Settings, and one notification per version, ever. */
+/** The "new version" notification: its own channel and one notification per version, ever. */
 object UpdateNotice {
     private const val CH = "updates"
     private const val ID = 4_000_000 // sign-in is 1M, attendance 2M and 3M; event notifications use small numbers
-    /** Set on the intent a tap on the notification starts MainActivity with, so the update dialog opens at once. */
-    const val EXTRA_SHOW_UPDATE = "showUpdate"
-
-    fun enabled(ctx: Context) = ctx.prefs.getBoolean("updNotify", true)
 
     fun notifyOnce(ctx: Context) {
         val info = UpdateChecker.available(ctx) ?: return
         val p = ctx.prefs
-        if (!enabled(ctx) || p.getInt("updNotifiedCode", 0) >= info.versionCode) return
+        if (p.getInt("updNotifiedCode", 0) >= info.versionCode) return
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (!nm.areNotificationsEnabled()) return // not recorded, so it can still go out if they allow notifications later
         p.edit().putInt("updNotifiedCode", info.versionCode).apply()
@@ -264,7 +248,7 @@ object UpdateNotice {
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Clockdown ${info.versionName} is available").setContentText("Tap to update.")
             .setContentIntent(PendingIntent.getActivity(ctx, ID, // ID as the request code: 78 is already openAttendance's, and equal-looking PendingIntents would merge
-                Intent(ctx, MainActivity::class.java).putExtra(EXTRA_SHOW_UPDATE, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setAutoCancel(true).build())
     }

@@ -88,7 +88,7 @@ class UpdateEngineTest {
         installed = 1
         store.map["updRelease"] = release("2")
         installed = 2
-        assertEquals(CheckResult.CURRENT, engine().check(CheckMode.AUTO))
+        assertEquals(CheckResult.CURRENT, engine().check(CheckMode.MANUAL))
         assertNull(store.getString("updRelease"))
     }
 
@@ -103,10 +103,10 @@ class UpdateEngineTest {
     }
 
     @Test
-    fun automaticChecksReuseTheCacheButRevalidateAlwaysAsks() {
+    fun checksWithinAMinuteReuseTheCacheButRevalidateAlwaysAsks() {
         server.enqueue(MockResponse.Builder().code(200).body(release("2")).build())
-        engine().check(CheckMode.AUTO)
-        engine().check(CheckMode.AUTO) // within 12 hours: no request
+        engine().check(CheckMode.MANUAL)
+        engine().check(CheckMode.MANUAL) // within a minute: no request
         assertEquals(1, server.requestCount)
         server.enqueue(MockResponse.Builder().code(304).build())
         engine().check(CheckMode.REVALIDATE)

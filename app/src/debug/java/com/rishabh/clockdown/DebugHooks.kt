@@ -78,8 +78,7 @@ class DebugHooks : BroadcastReceiver() {
                 return
             }
             // Fakes "a newer release exists" (the real GitHub answer is ignored while this is on, see UpdateChecker.check).
-            // Extras: clear=true removes the fake; rewind=true pretends 25 hours passed since the last dialog; reset=true forgets
-            // the dialog and notification history. Nothing is downloaded: "Update now" will report a failed download.
+            // Extras: clear=true removes the fake; reset=true forgets the notification history. Nothing is downloaded: "Update now" will report a failed download.
             "com.rishabh.clockdown.DEBUG_FAKE_UPDATE" -> {
                 val p = ctx.prefs
                 if (intent.getBooleanExtra("clear", false)) p.edit().remove("debugFakeUpdate").remove("updRelease").remove("updEtag").apply()
@@ -90,15 +89,14 @@ class DebugHooks : BroadcastReceiver() {
                         .put("assets", org.json.JSONArray().put(org.json.JSONObject().put("name", "Clockdown.apk").put("size", 1000).put("browser_download_url", "https://github.invalid/Clockdown.apk"))).toString()
                     p.edit().putBoolean("debugFakeUpdate", true).putString("updRelease", json).apply()
                 }
-                if (intent.getBooleanExtra("rewind", false)) p.edit().putLong("updPromptAt", System.currentTimeMillis() - 25 * 3_600_000L).apply()
-                if (intent.getBooleanExtra("reset", false)) p.edit().remove("updPromptAt").remove("updNotifiedCode").apply()
-                setResultData("updPromptAt=${p.getLong("updPromptAt", 0)} notified=${p.getInt("updNotifiedCode", 0)} available=${UpdateChecker.available(ctx)?.versionName}")
+                if (intent.getBooleanExtra("reset", false)) p.edit().remove("updNotifiedCode").apply()
+                setResultData("notified=${p.getInt("updNotifiedCode", 0)} available=${UpdateChecker.available(ctx)?.versionName}")
                 return
             }
-            // Runs the daily background update job's body now (the same function the real worker calls).
+            // Runs the background update check's body now (the same function the real worker calls).
             "com.rishabh.clockdown.DEBUG_UPDATE_RUN" -> {
                 val pending = goAsync()
-                kotlin.concurrent.thread { UpdateChecker.dailyRun(ctx); pending.resultData = "ran notified=${ctx.prefs.getInt("updNotifiedCode", 0)}"; pending.finish() }
+                kotlin.concurrent.thread { UpdateChecker.backgroundRun(ctx); pending.resultData = "ran notified=${ctx.prefs.getInt("updNotifiedCode", 0)}"; pending.finish() }
                 return
             }
             // Runs one keep-alive now, regardless of the time of day, and reports whether the saved cookie changed (never its value).

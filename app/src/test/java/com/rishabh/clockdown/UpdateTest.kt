@@ -45,15 +45,6 @@ class UpdateTest {
     }
 
     @Test
-    fun promptIsShownAtMostOncePerDay() {
-        val h = 3_600_000L
-        val now = 1_800_000_000_000L
-        assertEquals(true, updatePromptDue(0, now))                  // never shown
-        assertEquals(false, updatePromptDue(now - 23 * h, now))      // "Later" 23 hours ago
-        assertEquals(true, updatePromptDue(now - 24 * h, now))
-    }
-
-    @Test
     fun keepAliveRunsOnlyBetweenSevenAndEleven() {
         fun at(h: Int, m: Int = 0) = keepAliveWindow(java.time.LocalTime.of(h, m))
         assertEquals(false, at(6, 59)); assertEquals(true, at(7)); assertEquals(true, at(22, 59)); assertEquals(false, at(23)); assertEquals(false, at(3))

@@ -145,7 +145,7 @@ internal fun Event.subtitle(): String {
  * exact widget instead of asking "add to home screen?" (it's already going there).
  */
 @Composable
-fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boolean = false, openUpdate: Boolean = false) {
+fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boolean = false) {
     val ctx = LocalContext.current
     val dao = remember { AppDb.get(ctx) }
     val scope = rememberCoroutineScope()
@@ -165,7 +165,6 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
     var attSyncing by remember { mutableStateOf(false) }
     var updatePrompt by remember { mutableStateOf<UpdateInfo?>(null) } // the "new version" dialog shown on app open
     var updateChecks by remember { mutableIntStateOf(0) }              // bumped after every finished update check
-    var updateTapUsed by remember { mutableStateOf(false) }
     // null while we check whether this is a first run; nothing is asked of the person until then.
     var onboarding by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(Unit) { onboarding = withContext(Dispatchers.IO) { Onboarding.needed(ctx) } }
@@ -200,23 +199,22 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         Battery.refresh(ctx) // remembers if the exemption is on, so losing it later can be reported
         tick++; sync(manual = false)
-        // Cheap: answers from the cache unless the last check is over 12 hours old.
-        // An update we already know about is re-checked every time (cheap, conditional), so a withdrawn release loses its badge.
+        // Cheap: never asks GitHub more than once a minute. An update we already know about is re-checked every time
+        // (conditional), so a withdrawn release loses its badge.
         scope.launch {
             withContext(Dispatchers.IO) {
-                UpdateChecker.check(ctx, if (UpdateChecker.available(ctx) != null) CheckMode.REVALIDATE else CheckMode.AUTO)
+                UpdateChecker.check(ctx, if (UpdateChecker.available(ctx) != null) CheckMode.REVALIDATE else CheckMode.MANUAL)
             }
             if (UpdateChecker.available(ctx) == null) UpdateNotice.cancel(ctx)
             tick++; updateChecks++
         }
     }
     // Offer a newer version, only once a check has finished (so a withdrawn release is never offered) and the welcome flow is over.
-    // At most once a day; tapping the notification is the person asking for it, so that one is shown regardless.
+    // Every time the app is opened while a newer version exists; "Later" only closes it until the next time. Other dialogs
+    // (battery) come up after this one, so they sit on top of it and it is there as soon as they are closed.
     LaunchedEffect(onboarding, updateChecks) {
         if (onboarding != false || updatePrompt != null) return@LaunchedEffect
-        val info = UpdateChecker.available(ctx) ?: return@LaunchedEffect
-        val tapped = openUpdate && !updateTapUsed
-        if (tapped || UpdateChecker.promptDue(ctx)) { updateTapUsed = true; UpdateChecker.markPrompted(ctx); updatePrompt = info }
+        updatePrompt = UpdateChecker.available(ctx)
     }
     updatePrompt?.let { UpdateDialog(it) { updatePrompt = null; tick++ } }
     val updateReady = remember(tick) { UpdateChecker.available(ctx) != null }
