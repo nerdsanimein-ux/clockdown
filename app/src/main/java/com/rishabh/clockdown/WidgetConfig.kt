@@ -66,7 +66,7 @@ class WidgetConfigActivity : ComponentActivity() {
         if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return }
 
         val provider = AppWidgetManager.getInstance(this).getAppWidgetInfo(widgetId)?.provider?.className
-        val kind = when (provider) { TimersWidget::class.java.name -> Kind.LIST; ClassesWidget::class.java.name -> Kind.CLASSES; AttendanceWidget::class.java.name -> Kind.ATTENDANCE; else -> Kind.TIMER }
+        val kind = when (provider) { TimersWidget::class.java.name -> Kind.LIST; ClassesWidget::class.java.name -> Kind.CLASSES; AttendanceWidget::class.java.name -> Kind.ATTENDANCE; DueWidget::class.java.name -> Kind.DUE; else -> Kind.TIMER }
         setContent {
             ClockdownTheme {
                 if (kind == Kind.TIMER) {
@@ -196,7 +196,7 @@ private fun LookConfigScreen(kind: Kind, current: String?, currentStyle: WidgetS
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.statusBarsPadding().navigationBarsPadding().padding(horizontal = 20.dp)) {
             Spacer(Modifier.height(24.dp))
-            Text(when (kind) { Kind.LIST -> "List widget"; Kind.ATTENDANCE -> "Attendance widget"; else -> "Classes widget" }, style = MaterialTheme.typography.displaySmall)
+            Text(when (kind) { Kind.LIST -> "List widget"; Kind.ATTENDANCE -> "Attendance widget"; Kind.DUE -> "Due soon widget"; else -> "Classes widget" }, style = MaterialTheme.typography.displaySmall)
             Text(
                 if (kind != Kind.LIST) "Choose how this widget looks. You can change it later with a long-press on the widget."
                 else "Choose what this widget shows and how it looks. You can change it later with a long-press on the widget.",
@@ -215,6 +215,7 @@ private fun LookConfigScreen(kind: Kind, current: String?, currentStyle: WidgetS
                         when (kind) {
                             Kind.CLASSES -> Widgets.classesView(c, sampleClasses, st, now, null, light)
                             Kind.ATTENDANCE -> Widgets.attendanceView(c, sampleAttendance(), st, null, null, light)
+                            Kind.DUE -> Widgets.dueView(c, sampleDue(now), st, now, null, light)
                             else -> Widgets.listView(c, sampleList, "Coming up", "", st, now, null, light)
                         }
                     }
@@ -258,6 +259,17 @@ private fun Choice(title: String, subtitle: String, emoji: String, selected: Boo
         }
     }
 }
+
+/** Made-up rows for the look picker, so the Due soon widget can be previewed before there is any LMS data. */
+fun sampleDue(now: Long) = Widgets.DueModel(
+    "Due soon · +2 more",
+    listOf(
+        Widgets.DueRow(1, "Business Communication: Assignment 1", "Due Wed 2:00 pm · Business Communication", 0, now + 5 * 86_400_000L + 14 * 3_600_000L),
+        Widgets.DueRow(2, "Data Structures: Lab report", "Due Thu 11:59 pm · Data Structures", 1, now + 20 * 3_600_000L),
+        Widgets.DueRow(3, "Marketing case study", "⚠ Overdue · was due Mon 9:00 am · Marketing", 2, now - 2 * 3_600_000L),
+    ),
+    "",
+)
 
 /** Made-up rows for the look picker, so the Attendance widget can be previewed before there is any real data. */
 fun sampleAttendance() = Widgets.AttModel(

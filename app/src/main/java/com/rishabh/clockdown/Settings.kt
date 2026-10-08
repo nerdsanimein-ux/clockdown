@@ -1,5 +1,6 @@
 package com.rishabh.clockdown
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,6 +62,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -126,6 +128,35 @@ fun SettingsScreen(
                     if (connected && !expired) FilledTonalButton(onClick = onConnect) { Text("Sign in again") } else Button(onClick = onConnect) { Text(if (connected) "Sign in" else "Sign in to Amizone") }
                     if (connected) OutlinedButton(onClick = onDisconnect) { Text("Sign out") }
                 }
+            }
+
+            Group("LMS") {
+                var remind by remember { mutableStateOf(ctx.lmsReminders) }
+                var reading by remember { mutableStateOf(false) }
+                var updated by remember { mutableStateOf(LmsStore.load(ctx)?.updatedAt ?: 0L) }
+                Text(
+                    if (!connected) "Sign in to Amizone to use the LMS. It comes through your Amizone sign-in: there is no separate LMS password."
+                    else "Your courses, files and assignments, read through your Amizone sign-in. Last read: " + if (updated == 0L) "never" else LmsSync.updatedText(updated),
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Deadline reminders", style = MaterialTheme.typography.titleMedium)
+                        Text("A notification 24 hours and 3 hours before an assignment is due, only for ones Moodle hasn't marked as submitted.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(remind, { remind = it; ctx.prefs.edit().putBoolean("lmsReminders", it).apply(); scope.launch(Dispatchers.IO) { LmsReminders.reschedule(ctx) } })
+                }
+                if (connected) OutlinedButton(
+                    onClick = {
+                        reading = true
+                        scope.launch {
+                            val r = withContext(Dispatchers.IO) { LmsSync.run(ctx, force = true) }
+                            reading = false; updated = LmsStore.load(ctx)?.updatedAt ?: 0L
+                            Toast.makeText(ctx, r.message, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = !reading,
+                ) { Text(if (reading) "Reading…" else "Read the LMS now") }
             }
 
             Group("Sign-in details") {

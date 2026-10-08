@@ -190,4 +190,34 @@ class LmsLogicTest {
         assertEquals("Lecture 1.pdf", LmsFiles.nameFromDisposition("attachment; filename*=UTF-8''Lecture%201.pdf"))
         assertNull(LmsFiles.nameFromDisposition(null))
     }
+
+    // ---------------------------------------------------------------- wording and the injected stylesheet
+    @Test
+    fun countdownWords() {
+        val h = 3_600_000L; val d = 24 * h
+        assertEquals("5d 14h", LmsText.countdown(5 * d + 14 * h + 59 * 60_000))
+        assertEquals("1d 6h", LmsText.countdown(30 * h))
+        assertEquals("5h 12m", LmsText.countdown(5 * h + 12 * 60_000))
+        assertEquals("42m", LmsText.countdown(42 * 60_000))
+        assertEquals("now", LmsText.countdown(10_000))
+        assertEquals("2h late", LmsText.countdown(-2 * h - 5))
+        assertEquals("2d late", LmsText.countdown(-2 * d - 3 * h))
+        assertEquals("1m late", LmsText.countdown(-1000))
+    }
+
+    @Test
+    fun theInjectedStyleSheetIsStylingOnlyAndCannotBreakOut() {
+        for (dark in listOf(false, true)) {
+            val css = LmsStyle.css(dark)
+            assertFalse(css.contains("</style", ignoreCase = true))
+            assertFalse(css.contains("<script", ignoreCase = true))
+            assertFalse(css.contains("javascript:", ignoreCase = true))
+            assertFalse(css.contains("@import"))
+            assertFalse(css.contains("url(")) // nothing is ever fetched by it
+            val js = LmsStyle.inject(dark)
+            assertTrue(js.startsWith("(function(){try{")) // any problem is swallowed: the page is left as it was
+            assertTrue(js.endsWith("}catch(e){}})();"))
+            assertFalse(js.contains(".click(")); assertFalse(js.contains(".submit(")); assertFalse(js.contains(".value")) // never presses or fills anything
+        }
+    }
 }

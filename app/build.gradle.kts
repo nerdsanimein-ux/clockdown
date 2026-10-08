@@ -85,6 +85,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.androidx.security.crypto)
     implementation(libs.sentry.android.core) // crash reports (see CrashReporting)
+    implementation(libs.play.services.mlkit.document.scanner) // "Scan pages to PDF" for uploads (see Scan.kt); falls back to the plain camera without Google Play services
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver) // a fake GitHub for the updater tests
     testImplementation(libs.org.json) // real org.json for JVM tests; android.jar only has stubs

@@ -47,6 +47,12 @@ object Scheduler {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
+    /** Opens the LMS tab (the Due soon widget lands here). */
+    fun openLms(ctx: Context) = PendingIntent.getActivity(
+        ctx, 81, Intent(ctx, MainActivity::class.java).putExtra(EXTRA_OPEN_LMS, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
     internal fun exact(ctx: Context, at: Long, pi: PendingIntent) {
         val am = am(ctx)
         // USE_EXACT_ALARM is auto-granted on 33+; on 31-32 fall back to inexact rather than crash.
@@ -103,6 +109,8 @@ object Scheduler {
         // The same wakeup also fires a few minutes after the next class ends (see AlarmReceiver, REFRESH: that is when
         // attendance gets one more look). No separate alarm: this one already exists, it just may come a little earlier.
         val afterClass = AppDb.get(ctx).nextClassEnd(now - AFTER_CLASS_MS)?.plus(AFTER_CLASS_MS)?.takeIf { it > now }
-        exact(ctx, (dayFlips + midnight + listOfNotNull(afterClass)).min(), pi)
+        // ...and when the next assignment deadline passes, so the Due soon widget shows it as overdue instead of counting below zero.
+        val nextDue = if (ctx.amizoneConnected) LmsStore.load(ctx)?.assigns?.filter { it.pending }?.mapNotNull { it.dueMs }?.filter { it > now }?.minOrNull()?.plus(1000) else null
+        exact(ctx, (dayFlips + midnight + listOfNotNull(afterClass, nextDue)).min(), pi)
     }
 }

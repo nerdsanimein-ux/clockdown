@@ -50,6 +50,12 @@ class AttendanceWidget : AppWidgetProvider() {
     }
 }
 
+/** Due soon widget: the next assignments Moodle hasn't marked as submitted, with countdowns. Reads only what the app already saved. */
+class DueWidget : AppWidgetProvider() {
+    override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) = async { Scheduler.refreshWidget(ctx) }
+    override fun onDeleted(ctx: Context, ids: IntArray) = WidgetPrefs.remove(ctx, ids)
+}
+
 const val ACTION_ATT_REFRESH = "com.rishabh.clockdown.ATT_REFRESH"
 
 /** Each placed widget instance has its own settings, keyed by its appWidgetId. */
@@ -508,6 +514,84 @@ object Widgets {
         return attendanceView(ctx, m, WidgetPrefs.style(ctx, id) ?: Defaults.classStyle, Scheduler.openAttendance(ctx), if (m.signIn) reconnect else refresh)
     }
 
+    // ---------------------------------------------------------------- Due soon widget (the LMS)
+
+    class DueRow(val cmid: Int, val title: String, val sub: String, val accent: Int, val dueMs: Long?)
+
+    /** What the Due soon widget says, worked out once so the real widget, its preview and the tests agree. */
+    class DueModel(val header: String, val rows: List<DueRow>, val empty: String)
+
+    fun dueModel(ctx: Context, snap: LmsSnapshot?, now: Long, max: Int = ROWS): DueModel {
+        if (snap == null) return DueModel("Due soon", emptyList(), if (ctx.amizoneConnected) "Open Clockdown to load your assignments" else "Open Clockdown and sign in to Amizone")
+        val stale = ctx.sessionExpired || ctx.lmsFailure != null
+        val next = LmsDue.next(snap.assigns, now, max)
+        val rows = next.map { a ->
+            val course = snap.courseOf(a)?.let { titleCase(it.shortName.ifBlank { it.name }) }
+            val due = a.dueMs
+            val sub = when {
+                due == null -> "No due date"
+                due < now -> "⚠ Overdue · was due " + LmsText.dueShort(due, zone)
+                else -> "Due " + LmsText.dueShort(due, zone)
+            }
+            DueRow(a.cmid, a.name, listOfNotNull(sub, course).joinToString(" · "), lmsColor(a.courseId), a.dueMs)
+        }
+        val more = snap.assigns.count { it.pending } - rows.size
+        val header = "Due soon" + (if (more > 0) " · +$more more" else "") + (if (stale) " · ⚠ not refreshed" else "")
+        return DueModel(header, rows, if (snap.assigns.none { it.pending }) "Nothing due 🎉" else "Nothing coming up")
+    }
+
+    fun dueView(
+        ctx: Context, m: DueModel, style: WidgetStyle, now: Long, open: PendingIntent?, light: Boolean = Wallpaper.isLight(ctx),
+        rowClick: ((DueRow) -> PendingIntent?)? = null,
+    ): RemoteViews {
+        val look = Looks.of(ctx, style, 0, light)
+        val v = RemoteViews(ctx.packageName, Looks.layout(Kind.DUE, look.variant))
+        if (open != null) v.setOnClickPendingIntent(R.id.troot, open)
+        v.bg(R.id.troot, look.containerBg)
+        v.setViewVisibility(R.id.theader, View.VISIBLE)
+        v.setTextViewText(R.id.theader, m.header)
+        v.setTextColor(R.id.theader, look.containerFg)
+        v.setViewVisibility(R.id.tempty, vis(m.rows.isEmpty()))
+        v.setTextViewText(R.id.tempty, m.empty)
+        v.setTextColor(R.id.tempty, look.containerFg)
+        rows.forEachIndexed { i, row ->
+            val r = m.rows.getOrNull(i)
+            v.setViewVisibility(row.root, if (r != null) View.VISIBLE else if (m.rows.isEmpty()) View.GONE else View.INVISIBLE)
+            if (r == null) return@forEachIndexed
+            val rowLook = Looks.of(ctx, style, r.accent, light)
+            val fg = Looks.rowFg(ctx, style, r.accent, light)
+            v.bg(row.root, rowLook.rowBg(r.accent))
+            v.badge(row.emoji, fg == Color.WHITE)
+            v.setTextViewText(row.emoji, "📝")
+            v.setTextViewText(row.name, r.title)
+            v.setTextColor(row.name, fg)
+            v.setTextViewText(row.sub, r.sub)
+            v.setTextColor(row.sub, soft(fg))
+            rowClick?.invoke(r)?.let { v.setOnClickPendingIntent(row.root, it) }
+            // A live countdown for what is still ahead; an overdue one has nothing left to count.
+            val ahead = r.dueMs != null && r.dueMs > now
+            v.setViewVisibility(row.chrono, vis(ahead))
+            if (ahead) {
+                v.setTextColor(row.chrono, fg)
+                v.size(row.chrono, 17f * minOf(look.numeralScale, 1.2f))
+                v.countdown(row.chrono, r.dueMs!!, now)
+            }
+        }
+        return v
+    }
+
+    fun due(ctx: Context, id: Int, now: Long): RemoteViews {
+        val click = { r: DueRow ->
+            PendingIntent.getActivity(
+                ctx, 6_000_000 + r.cmid,
+                Intent(ctx, MainActivity::class.java).setData(Uri.parse("clockdown://lms/open/${r.cmid}")).putExtra(EXTRA_OPEN_LMS, true).putExtra(EXTRA_LMS_CMID, r.cmid)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        }
+        return dueView(ctx, dueModel(ctx, LmsStore.load(ctx), now), WidgetPrefs.style(ctx, id) ?: Defaults.classStyle, now, Scheduler.openLms(ctx), rowClick = click)
+    }
+
     /** Refreshes every placed instance of every widget. Call from a background thread. */
     fun updateAll(ctx: Context, upcoming: List<Event>, now: Long) {
         val mgr = AppWidgetManager.getInstance(ctx)
@@ -515,6 +599,7 @@ object Widgets {
         for (id in mgr.getAppWidgetIds(ComponentName(ctx, ClassesWidget::class.java))) mgr.updateAppWidget(id, classes(ctx, id, upcoming, now))
         for (id in mgr.getAppWidgetIds(ComponentName(ctx, TimersWidget::class.java))) mgr.updateAppWidget(id, list(ctx, id, upcoming, now))
         for (id in mgr.getAppWidgetIds(ComponentName(ctx, AttendanceWidget::class.java))) mgr.updateAppWidget(id, attendance(ctx, id, now))
+        for (id in mgr.getAppWidgetIds(ComponentName(ctx, DueWidget::class.java))) mgr.updateAppWidget(id, due(ctx, id, now))
     }
 
     /** Android 15+: show real content (not a grey placeholder) in the widget picker. Rate-limited by the system, so best effort. */
@@ -529,6 +614,7 @@ object Widgets {
             mgr.setWidgetPreview(ComponentName(ctx, ClassesWidget::class.java), home, classes(ctx, PREVIEW_ID, upcoming, now))
             mgr.setWidgetPreview(ComponentName(ctx, TimersWidget::class.java), home, list(ctx, PREVIEW_ID, upcoming, now))
             mgr.setWidgetPreview(ComponentName(ctx, AttendanceWidget::class.java), home, attendance(ctx, PREVIEW_ID, now))
+            mgr.setWidgetPreview(ComponentName(ctx, DueWidget::class.java), home, due(ctx, PREVIEW_ID, now))
         }
     }
 }

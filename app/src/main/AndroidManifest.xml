@@ -60,6 +60,10 @@
             android:exported="false"
             android:label="Connect Amizone" />
 
+        <!-- The LMS (Moodle) inside the app, and the page scanner it offers when a file is chosen (see LmsWeb.kt, Scan.kt). -->
+        <activity android:name=".LmsWebActivity" android:exported="false" android:label="LMS" />
+        <activity android:name=".ScanActivity" android:exported="false" android:label="Scan pages" />
+
         <!-- Crash reporting is started by our own code, so the user's off-switch is respected (see CrashReporting). -->
         <meta-data android:name="io.sentry.auto-init" android:value="false" />
 
@@ -107,6 +111,15 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_attendance_info" />
+        </receiver>
+
+        <receiver android:name=".DueWidget" android:exported="true" android:label="@string/widget_label_due">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_due_info" />
         </receiver>
 
         <!-- "Long ring" for timers only: keeps the sound going until dismissed (see Alarms.kt). -->

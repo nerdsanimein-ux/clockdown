@@ -51,6 +51,9 @@ data class LmsSnapshot(
     fun itemCount() = courses.sumOf { c -> c.sections.sumOf { it.items.size } }
 }
 
+/** One accent colour per course, the same on every screen and the widget. */
+fun lmsColor(courseId: Int) = Math.floorMod(courseId, PALETTE_SIZE)
+
 enum class DueGroup(val label: String) { OVERDUE("Overdue"), TODAY("Today"), WEEK("This week"), LATER("Later") }
 
 /** The "Due soon" list: what is pending, grouped by how soon, and what is already handed in. Pure, so every edge can be tested. */

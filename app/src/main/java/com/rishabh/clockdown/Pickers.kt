@@ -236,7 +236,7 @@ fun AddTimerWidgetDialog(event: Event, onDismiss: () -> Unit) {
 fun AddWidgetDialog(onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var manual by remember { mutableStateOf(false) }
-    if (manual) { ManualSteps("Choose Timer, Classes, List or Attendance, whichever you picked.", onDismiss); return }
+    if (manual) { ManualSteps("Choose Timer, Classes, List, Attendance or Due soon, whichever you picked.", onDismiss); return }
     fun go(provider: Class<*>) { if (Pinner.pin(ctx, provider)) onDismiss() else manual = true }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -247,6 +247,7 @@ fun AddWidgetDialog(onDismiss: () -> Unit) {
                 WidgetOption("Classes", "Your next class, then the rest of that day", "🎓") { go(ClassesWidget::class.java) }
                 WidgetOption("List", "What's coming up, soonest first", "📋") { go(TimersWidget::class.java) }
                 WidgetOption("Attendance", "Today's classes marked or not, and subjects to watch", "✅") { go(AttendanceWidget::class.java) }
+                WidgetOption("Due soon", "Assignments from your LMS that aren't handed in, with countdowns", "📝") { go(DueWidget::class.java) }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

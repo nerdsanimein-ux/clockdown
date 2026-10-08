@@ -15,6 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.NavigationBar
@@ -145,7 +146,7 @@ internal fun Event.subtitle(): String {
  * exact widget instead of asking "add to home screen?" (it's already going there).
  */
 @Composable
-fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boolean = false) {
+fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boolean = false, openLms: Boolean = false, lmsCmid: Int? = null) {
     val ctx = LocalContext.current
     val dao = remember { AppDb.get(ctx) }
     val scope = rememberCoroutineScope()
@@ -161,8 +162,9 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
     var settingsOpen by remember { mutableStateOf(false) }
     var pinEvent by remember { mutableStateOf<Event?>(null) } // a timer that was just saved: offer to put it on the home screen
     var addWidgetOpen by remember { mutableStateOf(false) }
-    var tab by rememberSaveable { mutableIntStateOf(if (openAttendance) 1 else 0) } // 0 = Home, 1 = Attendance
+    var tab by rememberSaveable { mutableIntStateOf(if (openLms) 2 else if (openAttendance) 1 else 0) } // 0 = Home, 1 = Attendance, 2 = LMS
     var attSyncing by remember { mutableStateOf(false) }
+    var lmsSyncing by remember { mutableStateOf(false) }
     var updatePrompt by remember { mutableStateOf<UpdateInfo?>(null) } // the "new version" dialog shown on app open
     var updateChecks by remember { mutableIntStateOf(0) }              // bumped after every finished update check
     // null while we check whether this is a first run; nothing is asked of the person until then.
@@ -178,7 +180,13 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 // Attendance follows the timetable (same sign-in, so a dead sign-in is found once and not twice).
-                AmizoneSync.run(ctx, force = manual).also { if (it == SyncResult.OK) AttendanceSync.run(ctx, minGapMs = if (manual) 0 else 60_000, force = manual) }
+                AmizoneSync.run(ctx, force = manual).also {
+                    if (it == SyncResult.OK) {
+                        AttendanceSync.run(ctx, minGapMs = if (manual) 0 else 60_000, force = manual)
+                        // The LMS rides along too, but gently: on opening the app at most every 15 minutes (pull down on the LMS tab to force it).
+                        LmsSync.run(ctx, force = manual, minGapMs = if (manual) 0 else 15 * 60_000L)
+                    }
+                }
             }
             syncing = false
             tick++
@@ -194,6 +202,17 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
             attSyncing = false
             tick++
             if (r == AttResult.FAILED) Toast.makeText(ctx, r.message, Toast.LENGTH_SHORT).show()
+        }
+    }
+    // Pull-to-refresh on the LMS screen: the LMS only, always runs.
+    fun refreshLms() {
+        if (!ctx.amizoneConnected || lmsSyncing) return
+        lmsSyncing = true
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { LmsSync.run(ctx, force = true) }
+            lmsSyncing = false
+            tick++
+            if (r != LmsResult.OK && r != LmsResult.UNREADABLE) Toast.makeText(ctx, r.message, Toast.LENGTH_SHORT).show()
         }
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -253,10 +272,15 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
     val expired = remember(tick) { ctx.sessionExpired }
     val attendance = remember(tick) { AttendanceStore.load(ctx) }
     val attFailure = remember(tick) { ctx.attFailure }
-    BackHandler(enabled = tab == 1) { tab = 0 } // the Attendance screens inside close first, then this goes back to Home
+    val lms = remember(tick) { LmsStore.load(ctx) }
+    val lmsProblem = remember(tick) { ctx.lmsFailure }
+    BackHandler(enabled = tab != 0) { tab = 0 } // the Attendance screens inside close first, then this goes back to Home
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Box {
       Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) {
-        CompositionLocalProvider(LocalUnconfirmed provides (unconfirmedSince != null), LocalAttendance provides attendance) { if (tab == 1) AttendanceTab(
+        CompositionLocalProvider(LocalUnconfirmed provides (unconfirmedSince != null), LocalAttendance provides attendance) { if (tab == 2) LmsTab(
+            snap = lms, connected = connected, expired = expired, failure = lmsProblem, refreshing = lmsSyncing || syncing,
+            onRefresh = ::refreshLms, onReconnect = { ctx.startActivity(Intent(ctx, LoginActivity::class.java)) }, onChanged = { tick++ }, openCmid = lmsCmid,
+        ) else if (tab == 1) AttendanceTab(
             snap = attendance, events = events, connected = connected, expired = expired, failure = attFailure, refreshing = attSyncing,
             onRefresh = ::refreshAttendance, onReconnect = { ctx.startActivity(Intent(ctx, LoginActivity::class.java)) },
         ) else HomeScreen(
@@ -282,6 +306,7 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
         NavigationBar {
             NavigationBarItem(tab == 0, { tab = 0 }, icon = { Icon(Icons.Filled.Home, contentDescription = null) }, label = { Text("Home") })
             NavigationBarItem(tab == 1, { tab = 1 }, icon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) }, label = { Text("Attendance") })
+            NavigationBarItem(tab == 2, { tab = 2 }, icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) }, label = { Text("LMS") })
         }
       }
 
