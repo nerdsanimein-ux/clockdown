@@ -21,10 +21,14 @@
                 <action android:name="com.rishabh.clockdown.DEBUG_FAKE_UPDATE" />
                 <action android:name="com.rishabh.clockdown.DEBUG_UPDATE_RUN" />
                 <action android:name="com.rishabh.clockdown.DEBUG_KEEPALIVE" />
+                <action android:name="com.rishabh.clockdown.DEBUG_LMS_TLS" />
             </intent-filter>
         </receiver>
 
         <!-- Preview gallery for reviewing widget styles; debug builds only. -->
         <activity android:name=".StyleGalleryActivity" android:exported="true" android:excludeFromRecents="true" />
+    
+        <!-- Certificate proof for the LMS in a WebView; debug builds only. Loads the public login page and logs the result. -->
+        <activity android:name=".LmsTlsProbeActivity" android:exported="true" android:excludeFromRecents="true" />
     </application>
 </manifest>

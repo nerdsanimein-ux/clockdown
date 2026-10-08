@@ -8,6 +8,13 @@
   store, not the OS one). Adding the same public root as an extra trust anchor - alongside the system
   store, not instead of it - fixes this without weakening validation anywhere: Amizone still has to present
   the real GlobalSign-issued chain, and every other domain is unaffected.
+
+  The LMS (alms06.amizone.net) has a different problem: its server sends ONLY its own certificate and leaves out the
+  intermediate that signed it (GlobalSign GCC R46 OV TLS CA 2025, valid to 2029-06-23), so Android cannot build the chain
+  (browsers quietly download the missing piece, Android does not). The intermediate is public and is bundled below as an
+  extra trust anchor for that ONE host, alongside the system store. The server still has to present a certificate that
+  this GlobalSign intermediate really signed, and certificate errors are never bypassed. If Amity's server is ever fixed
+  to send its full chain, this entry simply becomes unnecessary.
 -->
 <network-security-config>
     <domain-config>
@@ -15,6 +22,15 @@
         <trust-anchors>
             <certificates src="system" />
             <certificates src="@raw/globalsign_root_r46" />
+        </trust-anchors>
+    </domain-config>
+    <!-- More specific than the amizone.net entry above, so it wins for this host only. -->
+    <domain-config>
+        <domain includeSubdomains="false">alms06.amizone.net</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/globalsign_root_r46" />
+            <certificates src="@raw/globalsign_gcc_r46_ov_2025" />
         </trust-anchors>
     </domain-config>
 </network-security-config>

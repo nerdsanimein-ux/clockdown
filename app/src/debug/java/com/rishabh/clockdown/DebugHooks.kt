@@ -77,6 +77,18 @@ class DebugHooks : BroadcastReceiver() {
                 }
                 return
             }
+            // Certificate proof: one plain GET (default: the LMS login page; extra url=... for a control host) with the app's own HTTP client. Reports the outcome only.
+            "com.rishabh.clockdown.DEBUG_LMS_TLS" -> {
+                val pending = goAsync()
+                kotlin.concurrent.thread {
+                    pending.resultData = try {
+                        okhttp3.OkHttpClient.Builder().followRedirects(false).build().newCall(okhttp3.Request.Builder()
+                            .url(intent.getStringExtra("url") ?: "https://alms06.amizone.net/moodle_26odd/login/index.php").build()).execute().use { "http=${it.code}" }
+                    } catch (e: Exception) { "failed=${e.javaClass.simpleName}: ${e.message?.take(120)}" }
+                    pending.finish()
+                }
+                return
+            }
             // Fakes "a newer release exists" (the real GitHub answer is ignored while this is on, see UpdateChecker.check).
             // Extras: clear=true removes the fake; reset=true forgets the notification history. Nothing is downloaded: "Update now" will report a failed download.
             "com.rishabh.clockdown.DEBUG_FAKE_UPDATE" -> {
