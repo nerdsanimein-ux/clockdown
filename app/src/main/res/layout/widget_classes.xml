@@ -145,13 +145,6 @@
                     android:textColor="#B0FFFFFF"
                     android:textSize="11sp" />
             </LinearLayout>
-
-            <TextView
-                android:id="@+id/c0_dot"
-                android:layout_width="11dp"
-                android:layout_height="11dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/att_dot_none" />
         </LinearLayout>
 
         <LinearLayout
@@ -207,13 +200,6 @@
                     android:textColor="#B0FFFFFF"
                     android:textSize="11sp" />
             </LinearLayout>
-
-            <TextView
-                android:id="@+id/c1_dot"
-                android:layout_width="11dp"
-                android:layout_height="11dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/att_dot_none" />
         </LinearLayout>
 
         <LinearLayout
@@ -269,13 +255,6 @@
                     android:textColor="#B0FFFFFF"
                     android:textSize="11sp" />
             </LinearLayout>
-
-            <TextView
-                android:id="@+id/c2_dot"
-                android:layout_width="11dp"
-                android:layout_height="11dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/att_dot_none" />
         </LinearLayout>
 
         <TextView

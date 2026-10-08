@@ -130,12 +130,12 @@ object Widgets {
         Row(R.id.r3, R.id.r3_emoji, R.id.r3_name, R.id.r3_sub, R.id.r3_chrono),
     )
 
-    private class ClassRow(val root: Int, val bar: Int, val time: Int, val name: Int, val room: Int, val dot: Int)
+    private class ClassRow(val root: Int, val bar: Int, val time: Int, val name: Int, val room: Int)
 
     private val classRows = listOf(
-        ClassRow(R.id.c0, R.id.c0_bar, R.id.c0_time, R.id.c0_name, R.id.c0_room, R.id.c0_dot),
-        ClassRow(R.id.c1, R.id.c1_bar, R.id.c1_time, R.id.c1_name, R.id.c1_room, R.id.c1_dot),
-        ClassRow(R.id.c2, R.id.c2_bar, R.id.c2_time, R.id.c2_name, R.id.c2_room, R.id.c2_dot),
+        ClassRow(R.id.c0, R.id.c0_bar, R.id.c0_time, R.id.c0_name, R.id.c0_room),
+        ClassRow(R.id.c1, R.id.c1_bar, R.id.c1_time, R.id.c1_name, R.id.c1_room),
+        ClassRow(R.id.c2, R.id.c2_bar, R.id.c2_time, R.id.c2_name, R.id.c2_room),
     )
 
     private fun vis(show: Boolean) = if (show) View.VISIBLE else View.GONE
@@ -302,7 +302,7 @@ object Widgets {
     private val timeFmt get() = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
 
     /** The next class large, then the rest of that day, in [style]. [cls] is upcoming classes, soonest first. */
-    fun classesView(ctx: Context, cls: List<Event>, style: WidgetStyle, now: Long, click: PendingIntent?, light: Boolean = Wallpaper.isLight(ctx), snap: AttSnapshot? = null): RemoteViews {
+    fun classesView(ctx: Context, cls: List<Event>, style: WidgetStyle, now: Long, click: PendingIntent?, light: Boolean = Wallpaper.isLight(ctx)): RemoteViews {
         val next = cls.firstOrNull()
         val look = Looks.of(ctx, style, next?.colorIndex() ?: 0, light)
         val v = RemoteViews(ctx.packageName, Looks.layout(Kind.CLASSES, look.variant))
@@ -342,12 +342,6 @@ object Widgets {
             v.setTextColor(row.time, look.containerFg)
             v.setTextColor(row.name, look.containerFg)
             v.setTextColor(row.room, soft(look.containerFg))
-            // Same data as the Attendance tab; no record (or no attendance loaded) reads as not marked yet.
-            v.bg(row.dot, when (snap?.markFor(e)) {
-                ClassMark.PRESENT, ClassMark.OD -> R.drawable.att_dot_present
-                ClassMark.ABSENT -> R.drawable.att_dot_absent
-                else -> R.drawable.att_dot_none
-            })
         }
         val more = sameDay.size - CLASS_ROWS
         v.setViewVisibility(R.id.cmore, vis(more > 0))
@@ -360,7 +354,7 @@ object Widgets {
     }
 
     fun classes(ctx: Context, id: Int, upcoming: List<Event>, now: Long): RemoteViews =
-        classesView(ctx, upcoming.filter { it.source == AMIZONE }, WidgetPrefs.style(ctx, id) ?: Defaults.classStyle, now, Scheduler.openApp(ctx), snap = AttendanceStore.load(ctx))
+        classesView(ctx, upcoming.filter { it.source == AMIZONE }, WidgetPrefs.style(ctx, id) ?: Defaults.classStyle, now, Scheduler.openApp(ctx))
 
     // ---------------------------------------------------------------- List widget
 

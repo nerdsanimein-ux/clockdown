@@ -32,14 +32,6 @@ class StyleGalleryActivity : ComponentActivity() {
         val a = sampleClass(now).copy(progressStyle = ps)
         val b = sampleClass(now, 200, "Marketing Basics", "MB101")
         val c = sampleClass(now, 320, "Environmental Studies", "ES110")
-        val d = sampleClass(now, 440, "Technical Writing", "TW120")
-        // Marketing present, Environmental absent, Technical Writing has no record yet: one dot of each colour.
-        fun rec(e: Event, absent: Boolean) = ClassRecord(
-            java.time.Instant.ofEpochMilli(e.startMillis).atZone(AMIZONE_ZONE).toLocalDate(),
-            listOf(java.time.Instant.ofEpochMilli(e.startMillis).atZone(AMIZONE_ZONE).toLocalTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))),
-            if (absent) 0 else 1, if (absent) 1 else 0, false)
-        fun course(e: Event, rec: ClassRecord?) = CourseAtt(e.courseCode!!, e.name, null, null, true, 5, 10, listOfNotNull(rec))
-        val snap = AttSnapshot(listOf(course(a, null), course(b, rec(b, false)), course(c, rec(c, true)), course(d, null)), now)
         val mine = Event(id = 7, name = "Anna's birthday", startMillis = now + 3 * 86_400_000L + 3_600_000L, emoji = "🎂", colorIdx = 3, progressStyle = ps)
         setContent {
             ClockdownTheme {
@@ -55,8 +47,8 @@ class StyleGalleryActivity : ComponentActivity() {
                                 }
                             }
                             // Real widgets of these two are at least 4 columns wide, so one column of realistic tiles; 3 per page.
-                            Kind.CLASSES -> WidgetStyle.entries.drop(page * 2).take(2).forEach { s ->
-                                WidgetPreview(backdrop, 300.dp, 320.dp) { ctx -> Widgets.classesView(ctx, listOf(a, b, c, d), s, now, null, backdrop.light, snap) }
+                            Kind.CLASSES -> WidgetStyle.entries.drop(page * 3).take(3).forEach { s ->
+                                WidgetPreview(backdrop, 300.dp, 250.dp) { ctx -> Widgets.classesView(ctx, listOf(a, b, c), s, now, null, backdrop.light) }
                             }
                             Kind.ATTENDANCE -> WidgetStyle.entries.drop(page * 3).take(3).forEach { s ->
                                 WidgetPreview(backdrop, 300.dp, 250.dp) { ctx -> Widgets.attendanceView(ctx, sampleAttendance(), s, null, null, backdrop.light) }
