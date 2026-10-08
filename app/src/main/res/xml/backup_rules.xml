@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Never back up the Amizone session cookies (prefs.xml) or the WebView's own cookie store. -->
+<!-- Never back up the Amizone session cookies (prefs.xml), anything from the LMS (its session, saved data, downloaded files and scans) or the WebView's own cookie store. -->
 <full-backup-content>
     <exclude domain="sharedpref" path="prefs.xml" />
     <exclude domain="sharedpref" path="secure_session.xml" />
     <exclude domain="sharedpref" path="secure_login.xml" />
+    <exclude domain="sharedpref" path="secure_lms.xml" />
+    <exclude domain="sharedpref" path="lms_data.xml" />
+    <exclude domain="file" path="lms_files" />
+    <exclude domain="file" path="scans" />
     <exclude domain="root" path="app_webview" />
 </full-backup-content>

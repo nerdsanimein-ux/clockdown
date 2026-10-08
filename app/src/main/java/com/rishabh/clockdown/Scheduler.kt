@@ -47,7 +47,7 @@ object Scheduler {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    private fun exact(ctx: Context, at: Long, pi: PendingIntent) {
+    internal fun exact(ctx: Context, at: Long, pi: PendingIntent) {
         val am = am(ctx)
         // USE_EXACT_ALARM is auto-granted on 33+; on 31-32 fall back to inexact rather than crash.
         if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
@@ -83,6 +83,7 @@ object Scheduler {
     /** Call from a background thread. Reschedules every upcoming event's alarms and refreshes the widget. */
     fun rescheduleAll(ctx: Context) {
         AppDb.get(ctx).upcoming(System.currentTimeMillis()).forEach { schedule(ctx, it) }
+        LmsReminders.reschedule(ctx) // alarms don't survive a restart; the deadlines are in the saved LMS data
         refreshWidget(ctx)
     }
 

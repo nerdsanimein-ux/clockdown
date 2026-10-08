@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Only the folder where downloaded updates are kept can be shared with Android's installer. -->
+<!-- Only these folders can be handed to other apps: downloaded updates (for Android's installer), downloaded LMS course
+     files (to open or share) and scanned PDFs (to upload). -->
 <paths>
     <cache-path name="updates" path="updates/" />
+    <files-path name="lms" path="lms_files/" />
+    <files-path name="scans" path="scans/" />
+    <cache-path name="scanpages" path="scan-pages/" />
 </paths>

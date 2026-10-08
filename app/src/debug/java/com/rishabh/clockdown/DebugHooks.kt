@@ -7,6 +7,11 @@ import java.util.UUID
 
 /** Debug builds only. Lets the test suite reach states that are otherwise hard to create. Reports facts, never secrets. */
 class DebugHooks : BroadcastReceiver() {
+    private fun async2(block: () -> String) {
+        val pending = goAsync()
+        kotlin.concurrent.thread { pending.resultData = try { block() } catch (e: Throwable) { "error=${e.javaClass.simpleName}: ${e.message?.take(100)}" }; pending.finish() }
+    }
+
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
             // Simulates the user having changed their Amizone password: the saved one is now wrong.
@@ -122,6 +127,14 @@ class DebugHooks : BroadcastReceiver() {
                 }
                 return
             }
+            // ---- LMS test aids. Report labels and counts only: never a cookie, a form value or any assignment text.
+            "com.rishabh.clockdown.DEBUG_LMS_SSO" -> { async2 { LmsDebug.sso(ctx) } ; return }
+            "com.rishabh.clockdown.DEBUG_LMS_SYNC" -> { val force = intent.getBooleanExtra("force", true); async2 { LmsDebug.sync(ctx, force) }; return }
+            "com.rishabh.clockdown.DEBUG_LMS_PING" -> { async2 { LmsDebug.ping(ctx) }; return }
+            "com.rishabh.clockdown.DEBUG_LMS_KEYS" -> { val step = intent.getStringExtra("step") ?: "init"; async2 { LmsDebug.keys(ctx, step) }; return }
+            "com.rishabh.clockdown.DEBUG_LMS_EXPIRE" -> LmsSession.save(ctx, LmsSession.base(ctx) ?: "https://alms06.amizone.net/moodle_26odd", "MoodleSession=invalid", LmsSession.label(ctx))
+            "com.rishabh.clockdown.DEBUG_LMS_DUMP" -> { async2 { LmsDebug.dump(ctx) }; return }
+            "com.rishabh.clockdown.DEBUG_LMS_REMIND" -> { val h = intent.getIntExtra("hours", 24); async2 { LmsDebug.remind(ctx, h) }; return }
             // Sends one harmless test event to the crash-report service, to prove the wiring works.
             "com.rishabh.clockdown.DEBUG_SENTRY_TEST" -> {
                 CrashReporting.note("Clockdown test event (safe to ignore)")
@@ -176,5 +189,70 @@ object SessionProbe {
         jar(ctx).writeText(lines.joinToString(LF))
         log(ctx).appendText("$now $out" + LF)
         return out.toString()
+    }
+}
+
+/** Debug only. Everything returns a short label or counts. The Amizone form's values are held in memory only, never written anywhere. */
+object LmsDebug {
+    private var held: SsoForm? = null
+    private var heldAt = 0L
+    private var heldPid = 0
+
+    fun sso(ctx: Context): String = when (val r = LmsSso.signOn(ctx)) {
+        is SsoResult.Ok -> { LmsSession.save(ctx, r.base, r.cookie, r.label); "sso=OK label=${r.label} folder=${r.base.substringAfterLast('/')} cookieNames=${r.cookie.split(';').map { it.trim().substringBefore('=') }}" }
+        SsoResult.NoSession -> "sso=NoSession"; SsoResult.AmizoneExpired -> "sso=AmizoneExpired"; SsoResult.NoForm -> "sso=NoForm"
+        is SsoResult.Failed -> "sso=Failed(${r.kind})"
+    }
+
+    fun sync(ctx: Context, force: Boolean): String {
+        val t0 = System.currentTimeMillis()
+        val r = LmsSync.run(ctx, force = force)
+        val s = LmsStore.load(ctx)
+        return "lms=$r failure=${ctx.lmsFailure} ms=${System.currentTimeMillis() - t0} courses=${s?.courses?.size} read=${s?.courses?.count { it.readAt > 0 }} sections=${s?.courses?.sumOf { it.sections.size }} " +
+            "items=${s?.itemCount()} types=${s?.courses?.flatMap { c -> c.sections.flatMap { it.items } }?.groupingBy { it.type }?.eachCount()} assigns=${s?.assigns?.size} pending=${s?.assigns?.count { it.pending }} " +
+            "withDue=${s?.assigns?.count { it.dueMs != null }} statuses=${s?.assigns?.groupingBy { it.status }?.eachCount()} partial=${s?.partial} sem=${s?.semester}"
+    }
+
+    /** One GET of the signed-in dashboard with the saved cookie and NO re-sign-on: shows whether the session is alive right now. */
+    fun ping(ctx: Context): String {
+        val base = LmsSession.base(ctx) ?: return "ping=no-lms-session"
+        val cookie = LmsSession.cookie(ctx) ?: return "ping=no-cookie"
+        val r = LmsHttp.get("$base/my/courses.php", cookie, Session.userAgent(ctx) ?: "Clockdown-test")
+        return "ping=${lmsVerdict(r)} http=${r.code} setCookieNames=${r.setCookies.map { it.substringBefore('=') }}"
+    }
+
+    /** One-time-key tests. "init" holds the current Home form in memory and re-reads Home to see whether the values change. */
+    fun keys(ctx: Context, step: String): String {
+        val amizone = Session.cookies(ctx) ?: return "no amizone session"
+        val ua = Session.userAgent(ctx) ?: "Clockdown-test"
+        fun home() = LmsParse.currentSemester(LmsParse.ssoForms(AmizoneSync.fetch("/Home", emptyMap(), amizone, ua, xhr = false).body))
+        return when (step) {
+            "init" -> {
+                val a = home() ?: return "no form"
+                Thread.sleep(2000)
+                val b = home() ?: return "no form (second read)"
+                held = a; heldAt = System.currentTimeMillis(); heldPid = android.os.Process.myPid()
+                "held label=${a.label} sameKeysOnSecondHomeRead=${a.fields == b.fields} fieldNames=${a.fields.map { it.first }}"
+            }
+            "post" -> {
+                val f = held ?: return "nothing held (process restarted: pid now ${android.os.Process.myPid()}, was $heldPid)"
+                val r = LmsSso.postForm(LmsHttp.client, f, ua, System.currentTimeMillis(), LmsParse::ssoBase)
+                "ageMin=${(System.currentTimeMillis() - heldAt) / 60_000} replay=" + if (r is SsoResult.Ok) "WORKS" else "failed(${(r as? SsoResult.Failed)?.kind})"
+            }
+            "home" -> { val f = home(); "heldSameAsCurrent=${f?.fields == held?.fields} ageMin=${(System.currentTimeMillis() - heldAt) / 60_000}" }
+            else -> "unknown step"
+        }
+    }
+
+    fun dump(ctx: Context): String {
+        val s = LmsStore.load(ctx) ?: return "no snapshot"
+        return s.courses.joinToString(" ## ") { c -> "course(${c.id}) sections=" + c.sections.joinToString("|") { "${it.number}:'${it.title}'(${it.items.size})" } } +
+            " ## assign dates: " + s.assigns.joinToString { "${it.cmid}: open=${it.openText != null} due=${it.dueText != null} dueMs=${it.dueMs != null} status=${it.status}/'${it.statusText}' grading='${it.gradingText}' remaining='${it.remainingText}' comments=${it.comments} introChars=${it.intro.length}" }
+    }
+
+    fun remind(ctx: Context, hours: Int): String {
+        val a = LmsStore.load(ctx)?.assigns?.firstOrNull { it.pending && (it.dueMs ?: 0) > System.currentTimeMillis() } ?: return "no pending assignment with a deadline"
+        LmsReminders.fire(ctx, a.cmid, hours)
+        return "fired hours=$hours scheduledKeys=${LmsStore.reminderKeys(ctx)}"
     }
 }

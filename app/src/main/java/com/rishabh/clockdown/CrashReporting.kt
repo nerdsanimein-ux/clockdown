@@ -92,6 +92,17 @@ object CrashReporting {
         Sentry.captureEvent(event)
     }
 
+    /** The LMS couldn't be read or signed in to. Only the failure TYPE goes out ("course-format", "sso-network"...), never any course, name or page content. */
+    fun noteLmsFailure(kind: String) {
+        if (!Sentry.isEnabled()) return
+        val event = SentryEvent().apply {
+            level = SentryLevel.WARNING
+            message = Message().apply { formatted = "LMS couldn't be read"; message = formatted }
+        }
+        event.setTag("lms.failureKind", kind.take(40))
+        Sentry.captureEvent(event)
+    }
+
     private fun clean(event: SentryEvent): SentryEvent {
         event.user = null
         event.request = null

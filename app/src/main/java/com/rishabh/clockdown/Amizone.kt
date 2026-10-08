@@ -247,6 +247,9 @@ object AmizoneSync {
      */
     fun signOut(ctx: Context) {
         Session.clear(ctx)
+        LmsSession.clear(ctx)
+        LmsReminders.reschedule(ctx) // no longer signed in: cancels every deadline reminder (needs the saved list, so BEFORE the wipe)
+        LmsStore.clear(ctx)
         ctx.prefs.edit().remove("lastSync").remove("lastJson").remove("unconfirmed").remove("sessionExpired").apply()
         AttendanceStore.clear(ctx)
         WorkManager.getInstance(ctx).cancelUniqueWork("amizone")
@@ -293,6 +296,7 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
         AmizoneSync.run(applicationContext).let { result ->
             // The attendance rides along on this existing check (at most every 3 hours), so it adds no background work of its own.
             if (result == SyncResult.OK) AttendanceWakeups.enqueue(applicationContext, 3 * 3_600_000L, "attendance-periodic")
+            if (result == SyncResult.OK) LmsWakeups.periodic(applicationContext)
             if (result == SyncResult.FAILED) Result.retry() else Result.success()
         }
 }
