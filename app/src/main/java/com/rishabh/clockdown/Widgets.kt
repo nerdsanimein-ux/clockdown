@@ -521,7 +521,10 @@ object Widgets {
     /** What the Due soon widget says, worked out once so the real widget, its preview and the tests agree. */
     class DueModel(val header: String, val rows: List<DueRow>, val empty: String)
 
-    fun dueModel(ctx: Context, snap: LmsSnapshot?, now: Long, max: Int = ROWS): DueModel {
+    /** Three rows, not four: each needs room for a title of up to two lines plus its due date. The header says how many more there are. */
+    private const val DUE_ROWS = 3
+
+    fun dueModel(ctx: Context, snap: LmsSnapshot?, now: Long, max: Int = DUE_ROWS): DueModel {
         if (snap == null) return DueModel("Due soon", emptyList(), if (ctx.amizoneConnected) "Open Clockdown to load your assignments" else "Open Clockdown and sign in to Amizone")
         val stale = ctx.sessionExpired || ctx.lmsFailure != null
         val next = LmsDue.next(snap.assigns, now, max)
@@ -555,6 +558,7 @@ object Widgets {
         v.setTextViewText(R.id.tempty, m.empty)
         v.setTextColor(R.id.tempty, look.containerFg)
         rows.forEachIndexed { i, row ->
+            if (i >= DUE_ROWS) { v.setViewVisibility(row.root, View.GONE); return@forEachIndexed } // the list layout has a fourth slot; this widget uses three
             val r = m.rows.getOrNull(i)
             v.setViewVisibility(row.root, if (r != null) View.VISIBLE else if (m.rows.isEmpty()) View.GONE else View.INVISIBLE)
             if (r == null) return@forEachIndexed
@@ -564,6 +568,7 @@ object Widgets {
             v.badge(row.emoji, fg == Color.WHITE)
             v.setTextViewText(row.emoji, "📝")
             v.setTextViewText(row.name, r.title)
+            v.setInt(row.name, "setMaxLines", 2) // an assignment title may need two lines; the shared list layouts say one, and the List and Attendance widgets keep that
             v.setTextColor(row.name, fg)
             v.setTextViewText(row.sub, r.sub)
             v.setTextColor(row.sub, soft(fg))
