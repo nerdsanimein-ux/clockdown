@@ -282,6 +282,7 @@ class LmsWebActivity : ComponentActivity() {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(onClick = { chooserParams?.let { pickFile.launch(it.createIntent()) } }, Modifier.fillMaxWidth()) { Text("Choose from this phone") }
                     OutlinedButton(onClick = { scan.launch(Intent(this@LmsWebActivity, ScanActivity::class.java)) }, Modifier.fillMaxWidth()) { Text("Scan pages to PDF") }
+                    Text("Moodle takes one file each time. To add more, tap its Add button again. Several pages scanned together become one PDF.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (scans.isNotEmpty()) {
                         Text("Scanned earlier", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 6.dp))
                         scans.take(4).forEach { f ->

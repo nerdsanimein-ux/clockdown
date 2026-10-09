@@ -29,6 +29,7 @@
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_EXPIRE" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_DUMP" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_REMIND" />
+                <action android:name="com.rishabh.clockdown.DEBUG_PDF_INFO" />
             </intent-filter>
         </receiver>
 
@@ -37,5 +38,8 @@
     
         <!-- Certificate proof for the LMS in a WebView; debug builds only. Loads the public login page and logs the result. -->
         <activity android:name=".LmsTlsProbeActivity" android:exported="true" android:excludeFromRecents="true" />
+    
+        <!-- Debug only: lets adb start the scanner screen (it is not exported in the real app). -->
+        <activity-alias android:name=".ScanDebug" android:targetActivity=".ScanActivity" android:exported="true" />
     </application>
 </manifest>

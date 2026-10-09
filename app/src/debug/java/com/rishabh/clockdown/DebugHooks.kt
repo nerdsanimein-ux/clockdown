@@ -135,6 +135,8 @@ class DebugHooks : BroadcastReceiver() {
             "com.rishabh.clockdown.DEBUG_LMS_EXPIRE" -> LmsSession.save(ctx, LmsSession.base(ctx) ?: "https://alms06.amizone.net/moodle_26odd", "MoodleSession=invalid", LmsSession.label(ctx))
             "com.rishabh.clockdown.DEBUG_LMS_DUMP" -> { async2 { LmsDebug.dump(ctx) }; return }
             "com.rishabh.clockdown.DEBUG_LMS_REMIND" -> { val h = intent.getIntExtra("hours", 24); async2 { LmsDebug.remind(ctx, h) }; return }
+            // Reads the newest scan with Android's own PdfRenderer and reports its page count and sizes (no content).
+            "com.rishabh.clockdown.DEBUG_PDF_INFO" -> { async2 { LmsDebug.pdfInfo(ctx) }; return }
             // Sends one harmless test event to the crash-report service, to prove the wiring works.
             "com.rishabh.clockdown.DEBUG_SENTRY_TEST" -> {
                 CrashReporting.note("Clockdown test event (safe to ignore)")
@@ -254,5 +256,14 @@ object LmsDebug {
         val a = LmsStore.load(ctx)?.assigns?.firstOrNull { it.pending && (it.dueMs ?: 0) > System.currentTimeMillis() } ?: return "no pending assignment with a deadline"
         LmsReminders.fire(ctx, a.cmid, hours)
         return "fired hours=$hours scheduledKeys=${LmsStore.reminderKeys(ctx)}"
+    }
+
+    fun pdfInfo(ctx: Context): String {
+        val f = java.io.File(ctx.filesDir, LmsStore.SCANS).listFiles { x -> x.name.endsWith(".pdf") }?.maxByOrNull { it.lastModified() } ?: return "no scan"
+        return android.os.ParcelFileDescriptor.open(f, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+            android.graphics.pdf.PdfRenderer(fd).use { r ->
+                "pdf=${f.name} bytes=${f.length()} pages=${r.pageCount} sizes=" + (0 until r.pageCount).joinToString(",") { i -> r.openPage(i).use { "${it.width}x${it.height}" } }
+            }
+        }
     }
 }
