@@ -160,6 +160,7 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
     var editor by remember { mutableStateOf<Event?>(null) } // kept after closing so the exit animation still has content
     var editorOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var holidaysOpen by remember { mutableStateOf(false) }
     var pinEvent by remember { mutableStateOf<Event?>(null) } // a timer that was just saved: offer to put it on the home screen
     var addWidgetOpen by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableIntStateOf(if (openLms) 2 else if (openAttendance) 1 else 0) } // 0 = Home, 1 = Attendance, 2 = LMS
@@ -273,6 +274,7 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
     val attendance = remember(tick) { AttendanceStore.load(ctx) }
     val attFailure = remember(tick) { ctx.attFailure }
     val lms = remember(tick) { LmsStore.load(ctx) }
+    val holidays = remember(tick) { HolidayStore.load(ctx) }
     val lmsProblem = remember(tick) { ctx.lmsFailure }
     BackHandler(enabled = tab != 0) { tab = 0 } // the Attendance screens inside close first, then this goes back to Home
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Box {
@@ -287,6 +289,7 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
             events = events, now = now, connected = connected, syncing = syncing,
             expired = expired, unconfirmedSince = unconfirmedSince,
             attendance = attendance, attFailure = attFailure, onAttendance = { tab = 1 },
+            holidays = holidays, onHolidays = { holidaysOpen = true },
             batteryRevoked = batteryRevoked,
             onBatteryFix = { ctx.startActivity(Battery.requestIntent(ctx)) },
             onBatteryDismiss = { Battery.dismissWarning(ctx); tick++ },
@@ -371,6 +374,14 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
         }
 
         AnimatedVisibility(
+            holidaysOpen,
+            enter = slideInHorizontally(spatial) { it } + fadeIn(),
+            exit = slideOutHorizontally(spatial) { it } + fadeOut(),
+        ) {
+            HolidaysScreen(holidays, remember(tick) { HolidayStore.updatedAt(ctx) }, onBack = { holidaysOpen = false })
+        }
+
+        AnimatedVisibility(
             settingsOpen,
             enter = slideInHorizontally(spatial) { it } + fadeIn(),
             exit = slideOutHorizontally(spatial) { it } + fadeOut(),
@@ -395,7 +406,7 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
 private fun HomeScreen(
     events: List<Event>, now: Long, connected: Boolean, syncing: Boolean, updateReady: Boolean,
     expired: Boolean, unconfirmedSince: Long?, onSignIn: () -> Unit,
-    attendance: AttSnapshot?, attFailure: String?, onAttendance: () -> Unit,
+    attendance: AttSnapshot?, attFailure: String?, onAttendance: () -> Unit, holidays: List<Holiday>, onHolidays: () -> Unit,
     batteryRevoked: Boolean, onBatteryFix: () -> Unit, onBatteryDismiss: () -> Unit,
     onSync: () -> Unit, onSettings: () -> Unit, onAddWidget: () -> Unit, onNew: () -> Unit, onEdit: (Event) -> Unit,
 ) {
@@ -451,6 +462,7 @@ private fun HomeScreen(
             }
 
             if (connected) item(key = "attendance", span = full) { AttendanceCard(attendance, attFailure, expired, onAttendance) }
+            if (connected) item(key = "holidays", span = full) { HolidaysCard(holidays, onHolidays) }
 
             if (batteryRevoked) item(key = "battery", span = full) { BatteryWarning(onBatteryFix, onBatteryDismiss) }
 

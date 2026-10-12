@@ -174,6 +174,7 @@ object AmizoneSync {
         AppDb.get(ctx).replaceAmizone(from - 1, endMs, fresh).forEach { Scheduler.cancel(ctx, it) }
         p.edit().putLong("lastSync", now).putBoolean("unconfirmed", false).putBoolean("sessionExpired", false).remove("lastFailure").apply()
         Scheduler.rescheduleAll(ctx) // also refreshes the widgets, which drop their "Unconfirmed" note
+        HolidaySync.run(ctx, cookies, ua, force) // one extra request, at most every 6 hours; failures keep the old holidays
         ctx.getSystemService(NotificationManager::class.java).cancel(SIGN_IN_ID)
         return SyncResult.OK
     }
@@ -250,6 +251,7 @@ object AmizoneSync {
         LmsSession.clear(ctx)
         LmsReminders.reschedule(ctx) // no longer signed in: cancels every deadline reminder (needs the saved list, so BEFORE the wipe)
         LmsStore.clear(ctx)
+        HolidayStore.clear(ctx)
         ctx.prefs.edit().remove("lastSync").remove("lastJson").remove("unconfirmed").remove("sessionExpired").apply()
         AttendanceStore.clear(ctx)
         WorkManager.getInstance(ctx).cancelUniqueWork("amizone")

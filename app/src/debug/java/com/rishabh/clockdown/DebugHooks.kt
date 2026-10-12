@@ -127,6 +127,17 @@ class DebugHooks : BroadcastReceiver() {
                 }
                 return
             }
+            // One GET of an Amizone path (extras: path, q="a=b&c=d", xhr) with the saved session; body saved to files/fetch.txt.
+            "com.rishabh.clockdown.DEBUG_FETCH" -> {
+                val path = intent.getStringExtra("path") ?: "/Home"
+                val q = intent.getStringExtra("q").orEmpty().split("&").filter { "=" in it }.associate { it.substringBefore("=") to it.substringAfter("=") }
+                async2 {
+                    val r = AmizoneSync.fetch(path, q, Session.cookies(ctx) ?: return@async2 "no session", Session.userAgent(ctx) ?: "Clockdown-test", intent.getBooleanExtra("xhr", false))
+                    java.io.File(ctx.filesDir, "fetch.txt").writeText(r.body)
+                    "http=${r.code} type=${r.contentType} len=${r.body.length}"
+                }
+                return
+            }
             // ---- LMS test aids. Report labels and counts only: never a cookie, a form value or any assignment text.
             "com.rishabh.clockdown.DEBUG_LMS_SSO" -> { async2 { LmsDebug.sso(ctx) } ; return }
             "com.rishabh.clockdown.DEBUG_LMS_SYNC" -> { val force = intent.getBooleanExtra("force", true); async2 { LmsDebug.sync(ctx, force) }; return }
