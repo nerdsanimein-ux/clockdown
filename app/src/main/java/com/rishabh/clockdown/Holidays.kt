@@ -31,6 +31,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -138,6 +139,7 @@ fun HolidaysScreen(holidays: List<Holiday>, updatedAt: Long, onBack: () -> Unit)
     val pager = rememberPagerState(initialPage = 1) { 14 }
     val scope = rememberCoroutineScope()
     var picked by rememberSaveable { mutableStateOf<String?>(null) } // an ISO date
+    LaunchedEffect(pager.currentPage) { picked = null } // the banner belongs to the month it was tapped in
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -228,14 +230,15 @@ private fun MonthGrid(month: YearMonth, today: LocalDate, holidays: Set<LocalDat
                         val scheme = MaterialTheme.colorScheme
                         Box(
                             Modifier.aspectRatio(1f).fillMaxSize().clip(CircleShape)
-                                .then(if (holiday) Modifier.background(if (date.toString() == picked) scheme.primary else scheme.primaryContainer) else Modifier)
-                                .then(if (date == today) Modifier.border(1.5.dp, scheme.primary, CircleShape) else Modifier)
+                                .then(if (holiday) Modifier.background(scheme.primary) else Modifier)
+                                .then(if (holiday && date.toString() == picked) Modifier.border(3.dp, scheme.onSurface, CircleShape) else if (date == today) Modifier.border(1.5.dp, scheme.primary, CircleShape) else Modifier)
                                 .then(if (holiday) Modifier.clickable { onTap(date) } else Modifier),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
                                 "$n", style = MaterialTheme.typography.bodyMedium,
-                                color = if (holiday) (if (date.toString() == picked) scheme.onPrimary else scheme.onPrimaryContainer) else scheme.onSurface,
+                                color = if (holiday) scheme.onPrimary else scheme.onSurface,
+                                fontWeight = if (holiday) androidx.compose.ui.text.font.FontWeight.Bold else null,
                             )
                         }
                     }

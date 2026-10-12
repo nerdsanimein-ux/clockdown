@@ -34,4 +34,11 @@ class HolidaysTest {
         val d = LocalDate.of(2026, 10, 12)
         assertEquals(listOf("Today", "Tomorrow", "in 8 days"), listOf(0L, 1L, 8L).map { daysAwayText(d, d.plusDays(it)) })
     }
+
+    @Test
+    fun holidaysAreNeverParsedAsClasses() {
+        val cls = """{"id":5132929,"title":"BEHU3101 - SELF","start":"2026/10/01 02:01:00 PM","end":"2026/10/01 02:55:00 PM","sType":"C","CourseCode":"BEHU3101"}"""
+        val arr = JSONArray("[" + row("H", "Maha Navmi", "2026/10/19 12:00:00 AM", "2026/10/19 11:00:00 PM") + "," + cls + "]")
+        assertEquals(listOf(5132929L), parseClasses(arr).map { it.amizoneId })
+    }
 }

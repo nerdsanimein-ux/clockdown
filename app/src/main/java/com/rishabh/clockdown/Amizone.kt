@@ -98,8 +98,8 @@ enum class SyncResult(val message: String) {
 
 private fun JSONObject.str(key: String) = if (isNull(key)) null else optString(key).trim().ifBlank { null }
 
-/** Turns the GetDiaryEvents array into events sorted by start time. Throws on any malformed row. */
-fun parseClasses(arr: JSONArray): List<Event> = (0 until arr.length()).map { arr.getJSONObject(it) }.map { o ->
+/** Turns the GetDiaryEvents array into events sorted by start time. Throws on any malformed row. Holidays (sType "H", id 0) are not classes; see [parseHolidays]. */
+fun parseClasses(arr: JSONArray): List<Event> = (0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optString("sType") != "H" }.map { o ->
     val title = o.getString("title")
     val code = o.str("CourseCode") ?: title.substringBefore(" - ")
     fun millis(key: String) = LocalDateTime.parse(o.getString(key), TIME).atZone(IST).toInstant().toEpochMilli()

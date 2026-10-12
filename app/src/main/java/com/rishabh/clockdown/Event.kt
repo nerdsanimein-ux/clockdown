@@ -79,13 +79,14 @@ abstract class EventDao {
      * Replaces future amizone events starting in [now, end) with [fresh]. Manual events are never touched.
      * Existing rows keep their id (matched by amizoneId) so their alarms/notifications stay stable.
      * Returns the ids that were removed, so the caller can cancel their alarms.
+     * Rows with amizoneId 0 are old holidays that earlier versions saved as classes: always removed, wherever they fall.
      */
     @Transaction
     open fun replaceAmizone(now: Long, end: Long, fresh: List<Event>): List<Int> {
         val existing = amizone()
         val idFor = existing.associate { it.amizoneId to it.id }
         val freshIds = fresh.map { it.amizoneId }.toSet()
-        val gone = existing.filter { it.startMillis in (now + 1) until end && it.amizoneId !in freshIds }.map { it.id }
+        val gone = existing.filter { (it.startMillis in (now + 1) until end && it.amizoneId !in freshIds) || it.amizoneId == 0L }.map { it.id }
         deleteIds(gone)
         upsertAll(fresh.map { it.copy(id = idFor[it.amizoneId] ?: 0) })
         return gone
