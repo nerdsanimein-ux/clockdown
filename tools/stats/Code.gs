@@ -67,6 +67,7 @@ function doPost(e) {
     const sh = sheet(INSTALLS);
     const found = sh.getRange('A:A').createTextFinder(p.id).matchEntireCell(true).findNext();
     const now = Date.now();
+    sh.getRange('F:F').setNumberFormat('@'); // version names stay text: "1.10" must not become the number 1.1
     if (found) {
       const range = sh.getRange(found.getRow(), 1, 1, HEADER.length);
       range.setValues([applyPing(range.getValues()[0], p, now)]);
@@ -98,6 +99,7 @@ function refreshSummary() {
   if (!s.versions.length) lines.push(['No phones counted yet', '', '', '']);
   lines.push(blank);
   lines.push(['"Using it now" = opened in the last ' + ACTIVE_DAYS + ' days. Counting started with 1.7; test phones are left out.', '', '', '']);
+  out.getRange(8, 1, Math.max(1, lines.length - 7), 1).setNumberFormat('@'); // "1.7" stays text, not the number 1.7
   out.getRange(1, 1, lines.length, 4).setValues(lines);
   out.getRange('A1').setFontSize(18).setFontWeight('bold');
   out.getRange('A2').setFontColor('#666666');

@@ -33,15 +33,17 @@ object Stats {
         if (!enabled(ctx) || STATS_URL.isEmpty()) return false
         val p = ctx.prefs
         val now = System.currentTimeMillis()
-        if (!force && now - p.getLong("statsAt", 0) < GAP_MS) return false
+        val code = UpdateChecker.installedCode(ctx)
+        // Once a day, except right after an update: the new version is reported at once, so the sheet doesn't lag a day behind.
+        if (!force && code == p.getInt("statsCode", 0) && now - p.getLong("statsAt", 0) < GAP_MS) return false
         val id = p.getString("statsId", null) ?: UUID.randomUUID().toString().replace("-", "").also { p.edit().putString("statsId", it).apply() }
         val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
         val fresh = pi.firstInstallTime == pi.lastUpdateTime // never updated since it was installed
-        val json = body(id, UpdateChecker.installedCode(ctx), UpdateChecker.installedName(ctx), fresh, BuildConfig.DEBUG)
+        val json = body(id, code, UpdateChecker.installedName(ctx), fresh, BuildConfig.DEBUG)
         return try {
             // Google answers a web-app POST with a redirect to its reply; OkHttp follows it, so success is a plain 200.
             client.newCall(Request.Builder().url(STATS_URL).post(json.toRequestBody("application/json".toMediaType())).build()).execute().use { r ->
-                r.isSuccessful.also { if (it) p.edit().putLong("statsAt", now).apply() }
+                r.isSuccessful.also { if (it) p.edit().putLong("statsAt", now).putInt("statsCode", code).apply() }
             }
         } catch (e: IOException) { false } // offline: try again next time
     }
