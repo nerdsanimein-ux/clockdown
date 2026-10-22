@@ -204,6 +204,35 @@ object LmsFiles {
     }
 
     /**
+     * Blocking. Downloads one file a Moodle page links to (an attachment), with that page's own cookies, into the app's attachments
+     * folder (wiped on sign-out with the rest). Follows redirects only on the same https host. Null if it can't be fetched.
+     */
+    fun fetchUrl(ctx: Context, url: String, cookie: String, ua: String, name: String): File? {
+        val host = java.net.URI(url).host
+        var at = url
+        repeat(6) {
+            val req = okhttp3.Request.Builder().url(at).header("Cookie", cookie).header("User-Agent", ua).build()
+            val next: String = LmsHttp.client.newCall(req).execute().use { r ->
+                when {
+                    r.code in 300..399 -> java.net.URI(at).resolve(r.header("Location") ?: return null).also {
+                        if (it.scheme != "https" || !it.host.equals(host, true)) return null
+                    }.toString()
+                    r.code in 200..299 && !r.header("Content-Type").orEmpty().startsWith("text/html", true) -> {
+                        val dir = File(File(ctx.filesDir, LmsStore.LMS_FILES), "attachments").apply { mkdirs() }
+                        val part = File(dir, "$name.part")
+                        r.body.byteStream().use { input -> part.outputStream().use { input.copyTo(it) } }
+                        val done = File(dir, name).apply { delete() }
+                        return if (part.renameTo(done)) done else null
+                    }
+                    else -> return null // an error, or a sign-in page instead of the file
+                }
+            }
+            at = next
+        }
+        return null
+    }
+
+    /**
      * Blocking. Downloads a course file with the LMS session and returns it, or null when the page is something only the
      * in-app Moodle page can show (then the caller opens it there). Follows redirects by hand, same https host only.
      */

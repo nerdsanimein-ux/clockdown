@@ -2,4 +2,6 @@
 <resources>
 
     <style name="Theme.Clockdown" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- The in-app Moodle screen. Light by day; values-night makes it dark, so the WebView can darken Moodle itself. -->
+    <style name="Theme.Clockdown.Web" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

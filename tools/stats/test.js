@@ -28,11 +28,11 @@ ping({ id: id('f'), v: 11, vn: '1.6', fresh: true }, now - 30 * DAY); // install
 const s = summarize(Object.values(rows), now);
 const v = (code) => s.versions.find((x) => x.version === code);
 assert.strictEqual(s.latest, 12);
-assert.strictEqual(s.installsSeen, 5);
 assert.strictEqual(s.testInstalls, 1);
-assert.strictEqual(s.activeNow, 4);
-assert.strictEqual(s.activeOnOlder, 2);                      // a and b are active on 1.6
-assert.deepStrictEqual([v(12).fresh, v(12).updated, v(12).before, v(12).active], [1, 1, 0, 2]);
-assert.deepStrictEqual([v(11).fresh, v(11).updated, v(11).before, v(11).active, v(11).seen], [2, 0, 1, 2, 3]);
+assert.strictEqual(s.activeNow, 4);       // a, b, c, e (f not seen for 30 days, d is a test phone)
+assert.strictEqual(s.onLatest, 2);        // c, e
+assert.strictEqual(s.onOlder, 2);         // a, b
+assert.deepStrictEqual([v(12).active, v(12).downloads, v(12).updated], [2, 1, 1]); // e downloaded it, c updated to it
+assert.deepStrictEqual([v(11).active, v(11).downloads, v(11).updated], [2, 2, 1]); // a, f downloaded it; b updated to it
 assert.strictEqual(v(12).name, '1.7');
 console.log('all counting checks pass');

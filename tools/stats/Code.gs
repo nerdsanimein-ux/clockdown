@@ -32,32 +32,26 @@ function applyPing(row, p, now) {
   return r;
 }
 
-/** Per version: active now, how it got there, and the totals. Test (debug) installs are left out. */
+/**
+ * Per version: how many are using it now, and how they got it: a new download (first installed on this version) or an
+ * update from an older version. Test (debug) installs are left out.
+ */
 function summarize(rows, now) {
   const since = now - ACTIVE_DAYS * DAY_MS;
   const real = rows.filter((r) => Number(r[COL.debug]) !== 1);
   const by = {};
   for (const r of real) {
     const v = Number(r[COL.version]);
-    const s = by[v] || (by[v] = { version: v, name: '', active: 0, fresh: 0, fresh7: 0, updated: 0, updated7: 0, before: 0, seen: 0 });
-    const freshHere = r[COL.origin] === 'fresh' && Number(r[COL.first_version]) === v;
+    const s = by[v] || (by[v] = { version: v, name: '', active: 0, downloads: 0, updated: 0 });
     s.name = String(r[COL.version_name] || s.name);
-    s.seen++;
     if (Number(r[COL.last_seen]) >= since) s.active++;
-    if (freshHere) { s.fresh++; if (Number(r[COL.first_seen]) >= since) s.fresh7++; }
-    if (Number(r[COL.prev_version]) > 0) { s.updated++; if (Number(r[COL.changed_at]) >= since) s.updated7++; }
-    if (r[COL.origin] === 'update' && Number(r[COL.prev_version]) === 0) s.before++;
+    if (r[COL.origin] === 'fresh' && Number(r[COL.first_version]) === v) s.downloads++; else s.updated++;
   }
   const versions = Object.values(by).sort((a, b) => b.version - a.version);
   const latest = versions.length ? versions[0].version : 0;
-  return {
-    latest,
-    activeNow: versions.reduce((n, s) => n + s.active, 0),
-    activeOnOlder: versions.filter((s) => s.version < latest).reduce((n, s) => n + s.active, 0),
-    installsSeen: real.length,
-    testInstalls: rows.length - real.length,
-    versions,
-  };
+  const activeNow = versions.reduce((n, s) => n + s.active, 0);
+  const onLatest = versions.length ? versions[0].active : 0;
+  return { latest, activeNow, onLatest, onOlder: activeNow - onLatest, testInstalls: rows.length - real.length, versions };
 }
 
 // ---------------------------------------------------------------- Google side
@@ -90,27 +84,29 @@ function refreshSummary() {
   const out = sheet(SUMMARY);
   out.clear();
   const tz = 'Asia/Kolkata';
+  const blank = ['', '', '', ''];
   const lines = [
-    ['Clockdown versions', '', '', '', '', '', ''],
-    ['Updated ' + Utilities.formatDate(new Date(now), tz, 'd MMM yyyy, h:mm a') + ' IST. "Active" = opened or checked in during the last ' + ACTIVE_DAYS + ' days.', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Active installs', s.activeNow, '', 'Active but on an older version', s.activeOnOlder, 'Installs ever counted', s.installsSeen],
-    ['', '', '', '', '', '', ''],
-    ['Version', 'Code', 'Active now', 'Installed fresh (this week)', 'Updated to it (this week)', 'Already on it when counting began', 'All ever seen'],
+    ['Clockdown versions', '', '', ''],
+    ['Updated ' + Utilities.formatDate(new Date(now), tz, 'd MMM yyyy, h:mm a') + ' IST', '', '', ''],
+    blank,
+    ['Using Clockdown now', 'On the latest version', 'On an older version', ''],
+    [s.activeNow, s.onLatest, s.onOlder, ''],
+    blank,
+    ['Version', 'Using it now', 'New downloads', 'Updated to it'],
   ];
-  for (const v of s.versions) {
-    lines.push([(v.name || '?') + (v.version === s.latest ? '  (latest)' : ''), v.version, v.active, v.fresh + ' (' + v.fresh7 + ')', v.updated + ' (' + v.updated7 + ')', v.before, v.seen]);
-  }
-  if (!s.versions.length) lines.push(['No pings yet.', '', '', '', '', '', '']);
-  lines.push(['', '', '', '', '', '', '']);
-  lines.push(['A reinstalled or reset phone counts as a new install. ' + s.testInstalls + ' test (debug) installs are left out.', '', '', '', '', '', '']);
-  out.getRange(1, 1, lines.length, 7).setValues(lines);
+  for (const v of s.versions) lines.push([(v.name || '?') + (v.version === s.latest ? '  (latest)' : ''), v.active, v.downloads, v.updated]);
+  if (!s.versions.length) lines.push(['No phones counted yet', '', '', '']);
+  lines.push(blank);
+  lines.push(['"Using it now" = opened in the last ' + ACTIVE_DAYS + ' days. Counting started with 1.7; test phones are left out.', '', '', '']);
+  out.getRange(1, 1, lines.length, 4).setValues(lines);
   out.getRange('A1').setFontSize(18).setFontWeight('bold');
-  out.getRange('A4:G4').setFontWeight('bold');
-  out.getRange('B4').setFontSize(16); out.getRange('E4').setFontSize(16); out.getRange('G4').setFontSize(16);
-  out.getRange('A6:G6').setFontWeight('bold').setBackground('#EFEBE2');
-  out.setColumnWidth(1, 170); out.setColumnWidths(2, 6, 150);
-  out.setFrozenRows(6);
+  out.getRange('A2').setFontColor('#666666');
+  out.getRange('A4:C4').setFontWeight('bold');
+  out.getRange('A5:C5').setFontSize(22).setFontWeight('bold').setHorizontalAlignment('left');
+  out.getRange('A7:D7').setFontWeight('bold').setBackground('#EFEBE2');
+  out.getRange(lines.length, 1).setFontColor('#666666');
+  out.setColumnWidths(1, 4, 190);
+  out.setFrozenRows(7);
 }
 
 function onOpen() {

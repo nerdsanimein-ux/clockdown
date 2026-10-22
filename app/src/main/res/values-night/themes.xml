@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Night version of the in-app Moodle screen's theme: a dark theme is what lets the WebView darken Moodle's pages. -->
+    <style name="Theme.Clockdown.Web" parent="android:Theme.Material.NoActionBar" />
+</resources>

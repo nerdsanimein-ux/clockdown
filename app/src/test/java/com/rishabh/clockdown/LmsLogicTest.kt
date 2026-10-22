@@ -206,18 +206,18 @@ class LmsLogicTest {
     }
 
     @Test
-    fun theInjectedStyleSheetIsStylingOnlyAndCannotBreakOut() {
-        for (dark in listOf(false, true)) {
-            val css = LmsStyle.css(dark)
-            assertFalse(css.contains("</style", ignoreCase = true))
-            assertFalse(css.contains("<script", ignoreCase = true))
-            assertFalse(css.contains("javascript:", ignoreCase = true))
-            assertFalse(css.contains("@import"))
-            assertFalse(css.contains("url(")) // nothing is ever fetched by it
-            val js = LmsStyle.inject(dark)
-            assertTrue(js.startsWith("(function(){try{")) // any problem is swallowed: the page is left as it was
-            assertTrue(js.endsWith("}catch(e){}})();"))
-            assertFalse(js.contains(".click(")); assertFalse(js.contains(".submit(")); assertFalse(js.contains(".value")) // never presses or fills anything
-        }
+    fun theInjectedStyleSheetIsLayoutOnlyAndCannotBreakOut() {
+        val css = LmsStyle.css
+        assertFalse(css.contains("</style", ignoreCase = true))
+        assertFalse(css.contains("<script", ignoreCase = true))
+        assertFalse(css.contains("javascript:", ignoreCase = true))
+        assertFalse(css.contains("@import"))
+        assertFalse(css.contains("url(")) // nothing is ever fetched by it
+        // Moodle keeps its own colours: repainting them is what left white text on light boxes in dark mode.
+        assertFalse(css.contains("color:")); assertFalse(css.contains("background"))
+        val js = LmsStyle.inject
+        assertTrue(js.startsWith("(function(){try{")) // any problem is swallowed: the page is left as it was
+        assertTrue(js.endsWith("}catch(e){}})();"))
+        assertFalse(js.contains(".click(")); assertFalse(js.contains(".submit(")); assertFalse(js.contains(".value")) // never presses or fills anything
     }
 }

@@ -291,7 +291,7 @@ private fun UpdateRow(u: LmsUpdate, snap: LmsSnapshot, now: Long) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(u.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(LmsText.updateText(u.text, snap.courses), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                if (u.text != u.title) Text(LmsText.updateText(u.text, snap.courses), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 Text(LmsText.ago(now - u.at), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (!u.read) Spacer(Modifier.padding(start = 8.dp).size(10.dp).clip(MaterialTheme.shapes.extraLarge).background(MaterialTheme.colorScheme.primary))
@@ -412,7 +412,7 @@ private fun ItemRow(item: LmsItem, a: LmsAssign?, busy: Boolean, onClick: () -> 
 private fun mimeOf(f: File) = MimeTypeMap.getSingleton().getMimeTypeFromExtension(f.extension.lowercase()) ?: "*/*"
 
 /** False when no app on this phone can open the file (the caller then says so properly, instead of a toast that is easy to miss). */
-private fun viewFile(ctx: Context, f: File): Boolean {
+internal fun viewFile(ctx: Context, f: File): Boolean {
     val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
     return try { ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mimeOf(f)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)); true }
     catch (e: ActivityNotFoundException) { false }
@@ -428,7 +428,7 @@ internal fun viewerFor(ext: String): Pair<String, String>? = when (ext.lowercase
 }
 
 @Composable
-private fun NoViewerDialog(f: File, onClose: () -> Unit) {
+internal fun NoViewerDialog(f: File, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val app = viewerFor(f.extension)
     androidx.compose.material3.AlertDialog(
@@ -457,7 +457,7 @@ private fun NoViewerDialog(f: File, onClose: () -> Unit) {
     )
 }
 
-private fun shareFile(ctx: Context, f: File) {
+internal fun shareFile(ctx: Context, f: File) {
     val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
     ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType(mimeOf(f)).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share ${f.name}"))
 }

@@ -5,7 +5,6 @@ import android.app.Activity
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
@@ -65,50 +64,28 @@ import java.io.File
 import kotlin.concurrent.thread
 
 /**
- * Clockdown's own colours for Moodle's pages, injected as a stylesheet. STYLING ONLY: it changes how things look (colours, rounded
- * corners, hiding the site's own top bar, footer and chat bubble, which sit OUTSIDE the content) and never touches, clicks, fills
- * in or rewires anything. Moodle's own buttons and scripts do all the uploading and submitting. If a page ever changes shape and
- * the styling stops matching, the page simply looks plainer; it keeps working.
+ * The only changes made to Moodle's pages: hide the site's own top bar, footer, side-panel buttons and chat bubble (the app has
+ * its own bar), and keep wide pages from scrolling sideways. LAYOUT ONLY: Moodle keeps its own colours. Earlier versions
+ * repainted Moodle in the app's colours, which left white text on boxes that stayed light in dark mode. Dark mode is now the
+ * WebView's own darkening (see [LmsWebActivity]), which darkens every part of the page consistently.
+ * It never touches, clicks, fills in or rewires anything; if Moodle changes shape, the page just shows its own bars again.
  */
 object LmsStyle {
-    private fun v(dark: Boolean) = if (dark) {
-        "--cd-bg:#0F1115;--cd-surface:#15171C;--cd-raised:#1B1E24;--cd-text:#E6E4EB;--cd-muted:#B0AEB9;--cd-primary:#AFA8FF;--cd-on-primary:#2A1FA0;--cd-line:#3A3944;"
-    } else {
-        "--cd-bg:#F6F3EC;--cd-surface:#FBF9F4;--cd-raised:#EFEBE2;--cd-text:#1C1B20;--cd-muted:#55535F;--cd-primary:#4A3FE0;--cd-on-primary:#FFFFFF;--cd-line:#CBC7D0;"
-    }
-
-    fun css(dark: Boolean): String = """
-        :root{${v(dark)}color-scheme:${if (dark) "dark" else "light"};}
-        html,body{background:var(--cd-bg)!important;color:var(--cd-text)!important;font-family:Roboto,"Segoe UI",system-ui,sans-serif!important;}
-        body{padding-top:0!important;} #page,#page-wrapper,#region-main,#region-main-box,#page-content,.main-inner{background:transparent!important;color:var(--cd-text)!important;}
-        #page{margin-top:0!important;} #topofscroll{margin-top:0!important;}
+    val css: String = """
+        body{padding-top:0!important;} #page{margin-top:0!important;} #topofscroll{margin-top:0!important;}
         nav.navbar,.navbar.fixed-top,#page-footer,footer,.btn-footer-popover,#ai-tutor-widget,.drawer-toggles,.drawer-left-toggle,.drawer-right-toggle{display:none!important;}
-        a{color:var(--cd-primary);}
-        h1,h2,h3,h4,h5,.h1,.h2,.h3,.h4,.h5{color:var(--cd-text)!important;}
-        .text-muted,.dimmed_text,small,.small{color:var(--cd-muted)!important;}
-        .card,.generalbox,.box,.modal-content,.filemanager,.fp-content,.fp-toolbar,.fp-navbar,.fp-repo-area,.fp-iconview,.fp-tableview,.moodle-dialogue-base .moodle-dialogue-wrap,
-        .moodle-dialogue-base .moodle-dialogue-bd,.moodle-dialogue-base .moodle-dialogue-hd,.dropdown-menu,.tooltip-inner,.popover{
-          background:var(--cd-surface)!important;color:var(--cd-text)!important;border-color:var(--cd-line)!important;border-radius:20px!important;}
-        .moodle-dialogue-base .moodle-dialogue-hd{border-radius:20px 20px 0 0!important;}
-        table.generaltable,table.generaltable th,table.generaltable td,.table{background:transparent!important;color:var(--cd-text)!important;border-color:var(--cd-line)!important;}
-        input[type=text],input[type=password],input[type=search],input[type=number],input[type=url],input[type=email],select,textarea,.form-control,.custom-select,.form-select{
-          background:var(--cd-surface)!important;color:var(--cd-text)!important;border:1px solid var(--cd-line)!important;border-radius:14px!important;}
-        .btn{border-radius:999px!important;padding:.55rem 1.25rem!important;font-weight:600!important;}
-        .btn-primary{background:var(--cd-primary)!important;border-color:var(--cd-primary)!important;color:var(--cd-on-primary)!important;}
-        .btn-secondary,.btn-outline-secondary,.btn-light,.btn-link{background:transparent!important;border:1px solid var(--cd-line)!important;color:var(--cd-text)!important;}
-        .alert{border-radius:16px!important;} .filepicker-filename,.fp-filename{color:var(--cd-text)!important;}
+        .breadcrumb,nav[aria-label="Navigation bar"]{display:none!important;}
         html,body{overflow-x:clip!important;} /* clip, not hidden: "hidden" made Moodle's quiz page draw blank (Chromium, with its fixed-drawer layout) */
         .yui3-panel.moodle-dialogue{width:calc(100vw - 16px)!important;max-width:calc(100vw - 16px)!important;left:8px!important;min-width:0!important;}
         .yui3-panel.moodle-dialogue .moodle-dialogue-wrap,.yui3-panel.moodle-dialogue .moodle-dialogue-bd,.yui3-panel.moodle-dialogue .moodle-dialogue-hd{width:auto!important;max-width:100%!important;min-width:0!important;}
         .fp-generallayout > .fp-repo-area,.fp-generallayout > .col-md-3,.fp-generallayout > .col-md-9{flex:0 0 100%!important;max-width:100%!important;width:100%!important;}
         .fp-generallayout .fp-repo-area{display:flex!important;flex-direction:row!important;flex-wrap:wrap!important;gap:6px;}
-        .breadcrumb,nav[aria-label="Navigation bar"]{display:none!important;}
     """.trimIndent().replace(Regex("\\s*\\n\\s*"), " ")
 
     /** The script that adds (or refreshes) the stylesheet. Wrapped so that any problem is swallowed and the page is left as it was. */
-    fun inject(dark: Boolean): String =
+    val inject: String =
         "(function(){try{var s=document.getElementById('cd-style');if(!s){s=document.createElement('style');s.id='cd-style';(document.head||document.documentElement).appendChild(s);}" +
-            "s.textContent=${JSONObject.quote(css(dark))};}catch(e){}})();"
+            "s.textContent=${JSONObject.quote(css)};}catch(e){}})();"
 }
 
 /**
@@ -122,6 +99,8 @@ class LmsWebActivity : ComponentActivity() {
     private var loadProgress by mutableIntStateOf(0)
     private var problem by mutableStateOf<String?>(null)
     private var chooser by mutableStateOf(false)
+    private var downloading by mutableStateOf<String?>(null) // name of the attachment being fetched
+    private var noViewer by mutableStateOf<File?>(null)
     private var pageTitle by mutableStateOf("")
     private var chooserCallback: ValueCallback<Array<Uri>>? = null
     private var chooserParams: WebChromeClient.FileChooserParams? = null
@@ -156,6 +135,9 @@ class LmsWebActivity : ComponentActivity() {
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            // Dark mode: the WebView darkens Moodle itself (needs this activity's night theme, Theme.Clockdown.Web). Android 13+;
+            // older phones show Moodle in its normal light colours, which stay readable.
+            if (android.os.Build.VERSION.SDK_INT >= 33) settings.isAlgorithmicDarkeningAllowed = true
             Session.userAgent(this@LmsWebActivity)?.let { settings.userAgentString = it }
             setDownloadListener { url, ua, cd, mime, _ -> download(url, ua, cd, mime) }
             webViewClient = client()
@@ -189,6 +171,12 @@ class LmsWebActivity : ComponentActivity() {
                         }
                     }
                     if (chooser) FileChooserDialog()
+                    downloading?.let { name ->
+                        AlertDialog(onDismissRequest = {}, confirmButton = {}, title = { Text("Opening file") }, text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { Text(name); LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                        })
+                    }
+                    noViewer?.let { NoViewerDialog(it) { noViewer = null } }
                 }
             }
         }
@@ -210,8 +198,6 @@ class LmsWebActivity : ComponentActivity() {
         cm.flush()
     }
 
-    private fun dark() = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-
     private var shownAPage = false // false until a Moodle page has actually been drawn here
 
     private fun client() = object : WebViewClient() {
@@ -225,9 +211,9 @@ class LmsWebActivity : ComponentActivity() {
             return true
         }
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { problem = null }
-        override fun onPageCommitVisible(view: WebView, url: String) { shownAPage = true; view.evaluateJavascript(LmsStyle.inject(dark()), null) }
+        override fun onPageCommitVisible(view: WebView, url: String) { shownAPage = true; view.evaluateJavascript(LmsStyle.inject, null) }
         override fun onPageFinished(view: WebView, url: String) {
-            view.evaluateJavascript(LmsStyle.inject(dark()), null)
+            view.evaluateJavascript(LmsStyle.inject, null)
             pageTitle = view.title.orEmpty().substringBefore('|').trim()
             if (url.substringBefore('?').endsWith("/login/index.php")) signedOut(view)
         }
@@ -300,14 +286,24 @@ class LmsWebActivity : ComponentActivity() {
         )
     }
 
+    /**
+     * A file linked from a Moodle page (an attachment in an announcement, a slide deck): fetched with this page's sign-in and
+     * opened at once, the same way course files are. A silent download into a hidden folder looked like "nothing happened".
+     */
     private fun download(url: String, ua: String?, cd: String?, mime: String?) {
-        if (!LoginDetector.allowedPage(url)) return
-        runCatching {
-            val req = DownloadManager.Request(Uri.parse(url)).addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url).orEmpty())
-                .addRequestHeader("User-Agent", ua.orEmpty()).setMimeType(mime)
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, URLUtil.guessFileName(url, cd, mime))
-            getSystemService(DownloadManager::class.java).enqueue(req)
+        if (!LoginDetector.allowedPage(url) || downloading != null) return
+        val name = LmsFiles.safeName(URLUtil.guessFileName(url, cd, mime), "file")
+        downloading = name
+        val cookie = CookieManager.getInstance().getCookie(url).orEmpty()
+        thread {
+            val f = try { LmsFiles.fetchUrl(applicationContext, url, cookie, ua.orEmpty(), name) } catch (e: Exception) { null }
+            runOnUiThread {
+                downloading = null
+                when {
+                    f == null -> problem = "Couldn't download \"$name\". Check your connection and try again."
+                    !viewFile(this, f) -> noViewer = f
+                }
+            }
         }
     }
 
