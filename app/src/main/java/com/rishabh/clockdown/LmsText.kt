@@ -39,6 +39,20 @@ object LmsText {
         Instant.ofEpochMilli(ms).atZone(zone).format(DateTimeFormatter.ofPattern("EEE d MMM, h:mm a", Locale.getDefault())).replace("AM", "am").replace("PM", "pm")
 
     /** The emoji for a kind of course item. */
+    fun updateEmoji(kind: String) = when (kind) {
+        "mod_forum" -> "📣"; "mod_assign" -> "📝"; "mod_quiz" -> "❓"; "moodle", "core" -> "🔔"; else -> if ("grade" in kind) "🏅" else "🔔"
+    }
+
+    /** Moodle names a course by its long code ("Gr- BBA .../ EESU1117/2026-2027/Odd/409573"); say its real name instead. */
+    fun updateText(text: String, courses: List<LmsCourse>): String =
+        courses.filter { it.shortName.isNotBlank() }.fold(text) { t, c -> t.replace(c.shortName, titleCase(c.name)) }
+
+    /** "just now", "25 min ago", "3 h ago", "2 days ago" */
+    fun ago(ms: Long): String {
+        val m = ms / 60_000
+        return when { m < 1 -> "just now"; m < 60 -> "$m min ago"; m < 24 * 60 -> "${m / 60} h ago"; m < 48 * 60 -> "yesterday"; else -> "${m / (24 * 60)} days ago" }
+    }
+
     fun emoji(type: String) = when (type) {
         "resource" -> "📄"; "url" -> "🔗"; "assign" -> "📝"; "quiz" -> "❓"; "wiki" -> "📚"; "forum" -> "💬"
         "page" -> "📃"; "folder" -> "📁"; else -> "📎"

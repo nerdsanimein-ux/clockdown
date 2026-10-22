@@ -28,7 +28,8 @@
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_KEYS" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_EXPIRE" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_DUMP" />
-                <action android:name="com.rishabh.clockdown.DEBUG_LMS_REMIND" />
+                <action android:name="com.rishabh.clockdown.DEBUG_LMS_REMIND" />
+                <action android:name="com.rishabh.clockdown.DEBUG_STATS_PING" />
                 <action android:name="com.rishabh.clockdown.DEBUG_PDF_INFO" />
             </intent-filter>
         </receiver>

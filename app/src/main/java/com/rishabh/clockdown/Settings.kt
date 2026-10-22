@@ -350,6 +350,19 @@ fun SettingsScreen(
                 )
             }
 
+            Group("Version count") {
+                var on by remember { mutableStateOf(Stats.enabled(ctx)) }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Count this install", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    Switch(on, { on = it; Stats.setEnabled(ctx, it) })
+                }
+                Text(
+                    "Once a day Clockdown says which version it is on, so the developer knows how many people have updated. It sends a random number " +
+                        "made up by this app and the version, nothing else: never your Amizone ID, your name or your timetable.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Group("Crash reports") {
                 var on by remember { mutableStateOf(CrashReporting.enabled(ctx)) }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

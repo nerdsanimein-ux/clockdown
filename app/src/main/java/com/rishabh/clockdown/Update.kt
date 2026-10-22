@@ -253,6 +253,7 @@ object UpdateChecker {
 class UpdateWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     override fun doWork(): Result {
         UpdateChecker.backgroundRun(applicationContext)
+        Stats.ping(applicationContext) // the version counter rides on this daily job (at most once a day)
         return Result.success() // no retry: the next daily run is soon enough
     }
 }

@@ -22,6 +22,7 @@ class MainActivity : ComponentActivity() {
         thread {
             if (amizoneConnected) AmizoneSync.schedulePeriodic(applicationContext)
             UpdateChecker.scheduleDaily(applicationContext)
+            Stats.ping(applicationContext) // once a day at most; the daily job covers days the app isn't opened
         }
     }
 }

@@ -97,7 +97,7 @@ object LmsStyle {
         .btn-primary{background:var(--cd-primary)!important;border-color:var(--cd-primary)!important;color:var(--cd-on-primary)!important;}
         .btn-secondary,.btn-outline-secondary,.btn-light,.btn-link{background:transparent!important;border:1px solid var(--cd-line)!important;color:var(--cd-text)!important;}
         .alert{border-radius:16px!important;} .filepicker-filename,.fp-filename{color:var(--cd-text)!important;}
-        html,body{overflow-x:hidden!important;}
+        html,body{overflow-x:clip!important;} /* clip, not hidden: "hidden" made Moodle's quiz page draw blank (Chromium, with its fixed-drawer layout) */
         .yui3-panel.moodle-dialogue{width:calc(100vw - 16px)!important;max-width:calc(100vw - 16px)!important;left:8px!important;min-width:0!important;}
         .yui3-panel.moodle-dialogue .moodle-dialogue-wrap,.yui3-panel.moodle-dialogue .moodle-dialogue-bd,.yui3-panel.moodle-dialogue .moodle-dialogue-hd{width:auto!important;max-width:100%!important;min-width:0!important;}
         .fp-generallayout > .fp-repo-area,.fp-generallayout > .col-md-3,.fp-generallayout > .col-md-9{flex:0 0 100%!important;max-width:100%!important;width:100%!important;}
@@ -212,16 +212,20 @@ class LmsWebActivity : ComponentActivity() {
 
     private fun dark() = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
 
+    private var shownAPage = false // false until a Moodle page has actually been drawn here
+
     private fun client() = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
             if (LoginDetector.allowedPage(url)) return false
             // Anything that isn't Amity's own site (a link in a course, a mailto) opens outside the app.
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
+            // A course link opened straight through (Moodle redirects to it) leaves nothing to show here: don't stay behind as a blank page.
+            if (!shownAPage) finish()
             return true
         }
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { problem = null }
-        override fun onPageCommitVisible(view: WebView, url: String) { view.evaluateJavascript(LmsStyle.inject(dark()), null) }
+        override fun onPageCommitVisible(view: WebView, url: String) { shownAPage = true; view.evaluateJavascript(LmsStyle.inject(dark()), null) }
         override fun onPageFinished(view: WebView, url: String) {
             view.evaluateJavascript(LmsStyle.inject(dark()), null)
             pageTitle = view.title.orEmpty().substringBefore('|').trim()

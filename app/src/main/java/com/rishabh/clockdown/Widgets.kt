@@ -526,7 +526,7 @@ object Widgets {
 
     fun dueModel(ctx: Context, snap: LmsSnapshot?, now: Long, max: Int = DUE_ROWS): DueModel {
         if (snap == null) return DueModel("Due soon", emptyList(), if (ctx.amizoneConnected) "Open Clockdown to load your assignments" else "Open Clockdown and sign in to Amizone")
-        val stale = ctx.sessionExpired || ctx.lmsFailure != null
+        val stale = ctx.lmsFailure != null // the LMS has its own session: an expired Amizone sign-in alone doesn't make this stale
         val next = LmsDue.next(snap.assigns, now, max)
         val rows = next.map { a ->
             val course = snap.courseOf(a)?.let { titleCase(it.shortName.ifBlank { it.name }) }

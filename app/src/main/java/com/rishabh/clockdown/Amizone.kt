@@ -298,7 +298,8 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
         AmizoneSync.run(applicationContext).let { result ->
             // The attendance rides along on this existing check (at most every 3 hours), so it adds no background work of its own.
             if (result == SyncResult.OK) AttendanceWakeups.enqueue(applicationContext, 3 * 3_600_000L, "attendance-periodic")
-            if (result == SyncResult.OK) LmsWakeups.periodic(applicationContext)
+            // The LMS has its own session, so it is read even when Amizone's sign-in has lapsed (see LmsSync).
+            if (result != SyncResult.NO_SESSION) LmsWakeups.periodic(applicationContext)
             if (result == SyncResult.FAILED) Result.retry() else Result.success()
         }
 }

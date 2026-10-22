@@ -32,17 +32,26 @@ data class LmsAssign(
     val openText: String?, val dueText: String?, val openMs: Long?, val dueMs: Long?,
     val statusText: String?, val status: SubStatus?, val gradingText: String?, val remainingText: String?, val modifiedText: String?,
     val comments: Int?, val intro: String, val feedback: List<Pair<String, String>>, val fetchedAt: Long,
+    /** "assign", or another activity with a deadline that only Moodle's Timeline told us about ("quiz", ...). */
+    val type: String = "assign",
 ) {
     /** Not submitted as far as Moodle has told us (an unread page counts as not submitted: better a reminder too many). */
     val pending get() = status != SubStatus.SUBMITTED
-    val path get() = "mod/assign/view.php?id=$cmid"
+    val isAssign get() = type == "assign"
+    val path get() = "mod/$type/view.php?id=$cmid"
     val uploadPath get() = "mod/assign/view.php?id=$cmid&action=editsubmission"
 }
+
+/**
+ * One of Moodle's own notifications (the bell on the LMS website): an announcement or forum post, a grade, feedback, a
+ * submission receipt. [text] and [title] are Moodle's words; [url] is the page it points to.
+ */
+data class LmsUpdate(val id: Long, val at: Long, val kind: String, val title: String, val text: String, val url: String?, val read: Boolean)
 
 /** [updatedAt] is when everything was last read cleanly; [partial] means the latest read could not read some page. */
 data class LmsSnapshot(
     val base: String, val semester: String, val updatedAt: Long, val partial: Boolean,
-    val courses: List<LmsCourse>, val assigns: List<LmsAssign>,
+    val courses: List<LmsCourse>, val assigns: List<LmsAssign>, val updates: List<LmsUpdate> = emptyList(),
 ) {
     fun course(id: Int) = courses.firstOrNull { it.id == id }
     fun assign(cmid: Int) = assigns.firstOrNull { it.cmid == cmid }
@@ -129,7 +138,10 @@ object LmsStore {
                 .put("stT", a.statusText ?: JSONObject.NULL).put("st", a.status?.name ?: JSONObject.NULL)
                 .put("grT", a.gradingText ?: JSONObject.NULL).put("remT", a.remainingText ?: JSONObject.NULL).put("modT", a.modifiedText ?: JSONObject.NULL)
                 .put("cm", a.comments ?: JSONObject.NULL).put("intro", a.intro)
-                .put("fb", JSONArray(a.feedback.map { JSONArray().put(it.first).put(it.second) })).put("at", a.fetchedAt)
+                .put("fb", JSONArray(a.feedback.map { JSONArray().put(it.first).put(it.second) })).put("at", a.fetchedAt).put("type", a.type)
+        }))
+        .put("updates", JSONArray(s.updates.map { u ->
+            JSONObject().put("id", u.id).put("at", u.at).put("kind", u.kind).put("title", u.title).put("text", u.text).put("url", u.url ?: JSONObject.NULL).put("read", u.read)
         }))
 
     private fun JSONObject.s(k: String) = if (isNull(k)) null else getString(k)
@@ -152,9 +164,12 @@ object LmsStore {
                     a.s("stT"), a.s("st")?.let { runCatching { SubStatus.valueOf(it) }.getOrNull() }, a.s("grT"), a.s("remT"), a.s("modT"),
                     if (a.isNull("cm")) null else a.getInt("cm"), a.getString("intro"),
                     a.getJSONArray("fb").let { f -> (0 until f.length()).map { f.getJSONArray(it).let { r -> r.getString(0) to r.getString(1) } } },
-                    a.getLong("at"),
+                    a.getLong("at"), a.optString("type", "assign").ifBlank { "assign" },
                 )
             },
+            o.optJSONArray("updates")?.map2 { u ->
+                LmsUpdate(u.getLong("id"), u.getLong("at"), u.getString("kind"), u.getString("title"), u.getString("text"), u.s("url"), u.getBoolean("read"))
+            }.orEmpty(),
         )
     }
 }

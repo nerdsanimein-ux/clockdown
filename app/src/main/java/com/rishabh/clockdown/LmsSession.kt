@@ -112,6 +112,7 @@ object LmsSso {
 
     fun signOn(ctx: Context): SsoResult {
         val amizone = Session.cookies(ctx) ?: return SsoResult.NoSession
+        if (ctx.sessionExpired) return SsoResult.AmizoneExpired // known dead: don't knock on Amizone again (that re-posts the sign-in notice)
         val ua = Session.userAgent(ctx) ?: WebSettings.getDefaultUserAgent(ctx)
         val home = try { AmizoneSync.fetch("/Home", emptyMap(), amizone, ua, xhr = false) } catch (e: IOException) { return SsoResult.Failed("network") }
         when (home.verdict("submit.php")) {

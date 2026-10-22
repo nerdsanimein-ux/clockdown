@@ -226,4 +226,73 @@ class LmsParseTest {
         assertEquals(s, LmsStore.fromJson(LmsStore.toJson(s)))
         assertNotNull(LmsStore.fromJson(LmsStore.toJson(s.copy(assigns = listOf(a.copy(status = null, statusText = null, dueMs = null, comments = null))))))
     }
+
+    // ---- Moodle's Timeline and notifications (made-up values in the shape of the real AJAX answers)
+
+    private fun event(type: String, cmid: Int, at: Long, event: String = "close") =
+        """{"name":"x","activityname":"Quiz &amp; more","modulename":"$type","eventtype":"$event","timesort":$at,"course":{"id":7},
+           "url":"https://h/m/mod/$type/view.php?id=$cmid","action":{"name":"Attempt quiz now","actionable":true}}"""
+
+    @Test
+    fun timelineGivesEveryActivityWithADeadlineOncePerActivity() {
+        val json = """[{"error":false,"data":{"events":[${event("quiz", 5, 100, "open")},${event("quiz", 5, 200)},${event("assign", 6, 300, "due")}]}}]"""
+        val t = LmsParse.timeline(json)
+        assertEquals(listOf(5, 6), t.map { it.cmid })
+        assertEquals(200_000L, t.first { it.cmid == 5 }.dueMs) // the quiz's close, not its open
+        assertEquals("Quiz & more", t.first().name)
+        assertEquals("Attempt quiz now", t.first().action)
+        assertEquals(7, t.first().courseId)
+        assertThrows(LmsFormatException::class.java) { LmsParse.timeline("""[{"error":true,"exception":{}}]""") }
+    }
+
+    private fun note(id: Long, at: Long, url: String, read: Boolean = false, component: String = "mod_forum", type: String = "posts") =
+        """{"id":$id,"timecreated":$at,"component":"$component","eventtype":"$type","subject":"S$id","contexturlname":"Topic","smallmessage":"T posted in C: Announcements: Topic","contexturl":"$url","read":$read,"deleted":false}"""
+
+    @Test
+    fun notificationsDropSignInNoticesAndFoldRepeatsOfTheSamePost() {
+        val json = """[{"error":false,"data":{"notifications":[
+            ${note(1, 10, "https://h/m/mod/forum/discuss.php?d=1#p1", read = true)},
+            ${note(2, 30, "https://h/m/mod/forum/discuss.php?d=1#p1")},
+            ${note(3, 20, "", component = "moodle", type = "newlogin")},
+            ${note(4, 25, "https://h/m/mod/forum/discuss.php?d=2#p2", read = true)}]}}]"""
+        val u = LmsParse.notifications(json)
+        assertEquals(listOf(2L, 4L), u.map { it.id }) // newest first, sign-in notice gone, the repeat folded
+        assertFalse(u[0].read) // one unread copy keeps it unread
+        assertTrue(u[1].read)
+        assertEquals(30_000L, u[0].at)
+        assertEquals("Topic", u[0].title)
+        // A submission receipt reads as Moodle's sentence, not as the bare assignment name.
+        val receipt = LmsParse.notifications("""[{"error":false,"data":{"notifications":[${note(9, 5, "https://h/m/mod/assign/view.php?id=1", component = "mod_assign", type = "assign_notification")}]}}]""").single()
+        assertEquals("S9", receipt.title)
+    }
+
+    @Test
+    fun aQuizFromTheTimelineIsPendingAndOpensItsOwnPage() {
+        val e = LmsParse.timeline("""[{"error":false,"data":{"events":[${event("quiz", 5, 1_792_666_200)}]}}]""").single()
+        val q = LmsSync.fromTimeline(e, 1L)
+        assertTrue(q.pending)
+        assertFalse(q.isAssign)
+        assertEquals("mod/quiz/view.php?id=5", q.path)
+        assertEquals("Thursday, 22 October 2026, 4:20 PM", q.dueText)
+        assertEquals(q.dueMs, LmsParse.dateMs(q.dueText)) // written the way Moodle writes dates, and reads back the same
+    }
+
+    @Test
+    fun storeKeepsTypesAndUpdatesAndReadsOldSnapshotsWithoutThem() {
+        val q = LmsAssign(5, 9, "Quiz", null, "d", null, 1L, "Attempt quiz now", SubStatus.NONE, null, null, null, null, "", emptyList(), 2L, "quiz")
+        val s = LmsSnapshot("https://h/m", "sem", 1L, false, emptyList(), listOf(q), listOf(LmsUpdate(1, 2, "mod_forum", "T", "x", null, false)))
+        assertEquals(s, LmsStore.fromJson(LmsStore.toJson(s)))
+        val old = LmsStore.toJson(s).apply { remove("updates"); getJSONArray("assigns").getJSONObject(0).remove("type") }
+        val back = LmsStore.fromJson(old)
+        assertEquals("assign", back.assigns.single().type) // snapshots saved by 1.6 had only assignments
+        assertTrue(back.updates.isEmpty())
+    }
+
+    @Test
+    fun wordAndPowerPointFilesPointToTheFreeAppThatOpensThem() {
+        assertEquals("Google Docs", viewerFor("DOC")!!.first)
+        assertEquals("Google Slides", viewerFor("pptx")!!.first)
+        assertEquals("Google Sheets", viewerFor("xlsx")!!.first)
+        assertNull(viewerFor("zip"))
+    }
 }

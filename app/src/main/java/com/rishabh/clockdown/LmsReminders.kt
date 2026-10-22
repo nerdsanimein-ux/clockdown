@@ -89,7 +89,8 @@ object LmsReminders {
         val due = a.dueMs?.takeIf { it > now } ?: return
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH, "Assignment deadlines", NotificationManager.IMPORTANCE_DEFAULT))
-        val title = if (hours == H3) "Assignment due in ${((due - now + 30 * 60_000L) / HOUR).coerceAtLeast(1)} hours" else "Assignment due ${whenText(due, now, zone)}"
+        val what = when (a.type) { "assign" -> "Assignment due"; "quiz" -> "Quiz closes"; else -> "Due" }
+        val title = if (hours == H3) "$what in ${((due - now + 30 * 60_000L) / HOUR).coerceAtLeast(1)} hours" else "$what ${whenText(due, now, zone)}"
         val open = PendingIntent.getActivity(
             ctx, 5_000_000 + cmid,
             Intent(ctx, MainActivity::class.java).setData(Uri.parse("clockdown://lms/open/$cmid")).putExtra(EXTRA_OPEN_LMS, true).putExtra(EXTRA_LMS_CMID, cmid)

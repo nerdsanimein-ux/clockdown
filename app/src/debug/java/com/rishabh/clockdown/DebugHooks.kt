@@ -149,6 +149,8 @@ class DebugHooks : BroadcastReceiver() {
             // Reads the newest scan with Android's own PdfRenderer and reports its page count and sizes (no content).
             "com.rishabh.clockdown.DEBUG_PDF_INFO" -> { async2 { LmsDebug.pdfInfo(ctx) }; return }
             // Sends one harmless test event to the crash-report service, to prove the wiring works.
+            // Sends one version-count ping now, ignoring the once-a-day rule (marked debug, so the dashboard leaves it out).
+            "com.rishabh.clockdown.DEBUG_STATS_PING" -> { async2 { "statsSent=${Stats.ping(ctx, force = true)} enabled=${Stats.enabled(ctx)}" }; return }
             "com.rishabh.clockdown.DEBUG_SENTRY_TEST" -> {
                 CrashReporting.note("Clockdown test event (safe to ignore)")
                 io.sentry.Sentry.captureException(IllegalStateException("Clockdown test crash (safe to ignore)"))

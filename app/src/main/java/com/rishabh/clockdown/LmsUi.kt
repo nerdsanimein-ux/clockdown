@@ -87,13 +87,19 @@ fun LmsTab(
     BackHandler(enabled = stack.size > 1) { pop() }
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(30_000); value = System.currentTimeMillis() } }
 
+    // A quiz or other activity has no screen of its own here: Moodle's page is where it is done (from a reminder, the widget or a row).
+    val nonAssign = snap?.assign(top.removePrefix("a:").toIntOrNull() ?: -1)?.takeIf { top.startsWith("a:") && !it.isAssign }
+    val ctx = LocalContext.current
+    LaunchedEffect(nonAssign?.cmid) { if (nonAssign != null) { LmsWebActivity.open(ctx, nonAssign.path); pop() } }
+
     when {
+        nonAssign != null -> Unit
         top.startsWith("a:") && snap != null && snap.assign(top.drop(2).toIntOrNull() ?: -1) != null ->
             AssignmentScreen(snap, snap.assign(top.drop(2).toInt())!!, now, ::pop, onChanged)
         top.startsWith("c:") && snap != null && snap.course(top.drop(2).toIntOrNull() ?: -1) != null ->
             CourseScreen(snap, snap.course(top.drop(2).toInt())!!, ::pop) { push("a:$it") }
         else -> LmsHome(
-            snap, connected, expired, failure, refreshing, now, tab = if (top == "courses") "courses" else "due",
+            snap, connected, expired, failure, refreshing, now, tab = if (top == "courses" || top == "updates") top else "due",
             onTab = { route = it }, onRefresh = onRefresh, onReconnect = onReconnect,
             onAssign = { push("a:$it") }, onCourse = { push("c:$it") },
         )
@@ -129,6 +135,8 @@ private fun LmsHome(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         FilterChip(tab == "due", { onTab("due") }, label = { Text("Due soon") })
                         FilterChip(tab == "courses", { onTab("courses") }, label = { Text("Courses") })
+                        val unread = snap.updates.count { !it.read }
+                        FilterChip(tab == "updates", { onTab("updates") }, label = { Text(if (unread > 0) "Updates · $unread" else "Updates") })
                         Spacer(Modifier.weight(1f))
                         Text(
                             if (snap.updatedAt == 0L) "Not read yet" else "Updated ${LmsSync.updatedText(snap.updatedAt)}",
@@ -136,7 +144,7 @@ private fun LmsHome(
                         )
                     }
                 }
-                if (tab == "courses") courses(snap, onCourse) else dueSoon(snap, now, submittedOpen, { submittedOpen = !submittedOpen }, onAssign)
+                if (tab == "updates") updates(snap, now) else if (tab == "courses") courses(snap, onCourse) else dueSoon(snap, now, submittedOpen, { submittedOpen = !submittedOpen }, onAssign)
             }
         }
     }
@@ -147,7 +155,7 @@ private fun LazyListScope.problem(connected: Boolean, expired: Boolean, failure:
     val last = snap?.updatedAt?.takeIf { it > 0 }?.let { LmsSync.updatedText(it) }
     when {
         !connected -> item { Notice("Sign in to Amizone", "Your LMS comes through your Amizone sign-in. There is no separate LMS password.", "Sign in to Amizone", onReconnect) }
-        expired -> item { Notice("Amizone sign-in needed", "Showing your last LMS data${last?.let { ", read $it" } ?: ""}. Tap to reconnect Amizone.", "Reconnect Amizone", onReconnect) }
+        expired && (failure == "signin" || snap == null) -> item { Notice("Amizone sign-in needed", "Showing your last LMS data${last?.let { ", read $it" } ?: ""}. Tap to reconnect Amizone.", "Reconnect Amizone", onReconnect) }
         failure == "format" -> item { Notice("LMS couldn't be read right now", "Amity's LMS may have changed. Showing the last data that was read cleanly${last?.let { " ($it)" } ?: ""}. Try again later.", null, null) }
         failure == "nolms" -> item { Notice("No LMS found", "Amizone didn't offer an LMS button for this account.", null, null) }
         failure == "network" && snap != null -> item { Notice("Couldn't refresh", "Showing the last data from ${last ?: "earlier"}.", null, null) }
@@ -224,7 +232,7 @@ private fun AssignRow(a: LmsAssign, course: LmsCourse?, now: Long, onClick: () -
     val late = a.pending && left != null && left < 0
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).clickable(onClick = onClick)) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            EmojiBadge("📝", accent, 46.dp)
+            EmojiBadge(LmsText.emoji(a.type), accent, 46.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(titleCase(course?.shortName?.ifBlank { null } ?: course?.name ?: ""), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -255,6 +263,40 @@ private fun StatusChip(a: LmsAssign, modifier: Modifier = Modifier) {
         a.statusText ?: "Checking with Moodle…", style = MaterialTheme.typography.labelMedium, color = fg, maxLines = 2, overflow = TextOverflow.Ellipsis,
         modifier = modifier.clip(MaterialTheme.shapes.small).background(bg).padding(horizontal = 10.dp, vertical = 3.dp),
     )
+}
+
+// ---------------------------------------------------------------- Updates
+
+/** Moodle's own notifications: announcements and forum posts, grades, feedback. Tapping one opens the page it is about, in Moodle. */
+private fun LazyListScope.updates(snap: LmsSnapshot, now: Long) {
+    if (snap.updates.isEmpty()) item {
+        Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("🔔", style = MaterialTheme.typography.displayMedium)
+            Text("No updates from the LMS yet", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+        }
+    }
+    items(snap.updates, key = { "u${it.id}" }) { u -> UpdateRow(u, snap, now) }
+}
+
+@Composable
+private fun UpdateRow(u: LmsUpdate, snap: LmsSnapshot, now: Long) {
+    val ctx = LocalContext.current
+    val path = u.url?.takeIf { it.startsWith(snap.base + "/") }?.removePrefix(snap.base + "/")
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).clickable(enabled = path != null) { LmsWebActivity.open(ctx, path!!) },
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(LmsText.updateEmoji(u.kind), style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(u.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(LmsText.updateText(u.text, snap.courses), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text(LmsText.ago(now - u.at), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (!u.read) Spacer(Modifier.padding(start = 8.dp).size(10.dp).clip(MaterialTheme.shapes.extraLarge).background(MaterialTheme.colorScheme.primary))
+        }
+    }
 }
 
 // ---------------------------------------------------------------- Courses
@@ -293,6 +335,7 @@ private fun CourseScreen(snap: LmsSnapshot, course: LmsCourse, onBack: () -> Uni
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(setOf<Int>()) }
+    var noViewer by remember { mutableStateOf<File?>(null) } // a file this phone has no app for (often Word or PowerPoint)
 
     /** A course file: downloaded with the LMS session, then opened (or shared). If only Moodle's own page can show it, it opens there. */
     fun file(item: LmsItem, share: Boolean) {
@@ -302,10 +345,11 @@ private fun CourseScreen(snap: LmsSnapshot, course: LmsCourse, onBack: () -> Uni
             val f = withContext(Dispatchers.IO) { try { LmsFiles.fetch(ctx, item) } catch (e: Exception) { null } }
             busy = busy - item.cmid
             if (f == null) { Toast.makeText(ctx, "Opening it in Moodle", Toast.LENGTH_SHORT).show(); LmsWebActivity.open(ctx, item.path) }
-            else if (share) shareFile(ctx, f) else viewFile(ctx, f)
+            else if (share) shareFile(ctx, f) else if (!viewFile(ctx, f)) noViewer = f
         }
     }
 
+    noViewer?.let { NoViewerDialog(it) { noViewer = null } }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -330,7 +374,12 @@ private fun CourseScreen(snap: LmsSnapshot, course: LmsCourse, onBack: () -> Uni
                 items(s.items, key = { "i${it.cmid}" }) { item ->
                     val a = snap.assign(item.cmid)
                     ItemRow(item, a, item.cmid in busy,
-                        onClick = { when (item.type) { "resource" -> file(item, share = false); "assign" -> if (a != null) onAssign(item.cmid) else LmsWebActivity.open(ctx, item.path); else -> LmsWebActivity.open(ctx, item.path) } },
+                        onClick = { when (item.type) {
+                            "resource" -> file(item, share = false)
+                            "assign" -> if (a != null) onAssign(item.cmid) else LmsWebActivity.open(ctx, item.path)
+                            "url" -> LmsWebActivity.open(ctx, item.path + "&redirect=1") // straight to the material, not Moodle's "click here" page
+                            else -> LmsWebActivity.open(ctx, item.path)
+                        } },
                         onShare = if (item.type == "resource") ({ file(item, share = true) }) else null,
                     )
                 }
@@ -342,7 +391,7 @@ private fun CourseScreen(snap: LmsSnapshot, course: LmsCourse, onBack: () -> Uni
 @Composable
 private fun ItemRow(item: LmsItem, a: LmsAssign?, busy: Boolean, onClick: () -> Unit, onShare: (() -> Unit)?) {
     val kind = when (item.type) {
-        "resource" -> "File" + (item.badge?.let { " · $it" } ?: ""); "url" -> "Link · opens in Moodle"; "quiz" -> "Quiz · opens in Moodle"; "wiki" -> "Wiki · opens in Moodle"
+        "resource" -> "File" + (item.badge?.let { " · $it" } ?: ""); "url" -> "Link"; "quiz" -> "Quiz · opens in Moodle"; "wiki" -> "Wiki · opens in Moodle"
         "assign" -> "Assignment"; "forum" -> "Forum · opens in Moodle"; "page" -> "Page · opens in Moodle"; "folder" -> "Folder · opens in Moodle"; else -> "Opens in Moodle"
     }
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable(onClick = onClick)) {
@@ -362,10 +411,50 @@ private fun ItemRow(item: LmsItem, a: LmsAssign?, busy: Boolean, onClick: () -> 
 
 private fun mimeOf(f: File) = MimeTypeMap.getSingleton().getMimeTypeFromExtension(f.extension.lowercase()) ?: "*/*"
 
-private fun viewFile(ctx: Context, f: File) {
+/** False when no app on this phone can open the file (the caller then says so properly, instead of a toast that is easy to miss). */
+private fun viewFile(ctx: Context, f: File): Boolean {
     val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
-    try { ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mimeOf(f)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
-    catch (e: ActivityNotFoundException) { Toast.makeText(ctx, "No app on this phone can open this file. Try Share.", Toast.LENGTH_LONG).show() }
+    return try { ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mimeOf(f)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)); true }
+    catch (e: ActivityNotFoundException) { false }
+}
+
+/** The free app that opens this kind of file, for the "no app can open it" dialog: (its name, its Play Store id), or null. */
+internal fun viewerFor(ext: String): Pair<String, String>? = when (ext.lowercase()) {
+    "doc", "docx", "odt", "rtf" -> "Google Docs" to "com.google.android.apps.docs.editors.docs"
+    "ppt", "pptx", "pps", "ppsx", "odp" -> "Google Slides" to "com.google.android.apps.docs.editors.slides"
+    "xls", "xlsx", "csv", "ods" -> "Google Sheets" to "com.google.android.apps.docs.editors.sheets"
+    "pdf" -> "Google Drive" to "com.google.android.apps.docs"
+    else -> null
+}
+
+@Composable
+private fun NoViewerDialog(f: File, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val app = viewerFor(f.extension)
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("No app to open this file") },
+        text = {
+            Text(
+                "\"${f.name}\" is downloaded, but this phone has no app for .${f.extension.lowercase()} files." +
+                    (app?.let { " ${it.first} opens them, and it's free." } ?: "") + " You can also send it to another app with Share.",
+            )
+        },
+        confirmButton = {
+            if (app != null) TextButton(onClick = {
+                onClose()
+                runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=${app.second}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    .onFailure { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://play.google.com/store/apps/details?id=${app.second}"))) } }
+            }) { Text("Get ${app.first}") }
+            else TextButton(onClick = { onClose(); shareFile(ctx, f) }) { Text("Share") }
+        },
+        dismissButton = {
+            Row {
+                if (app != null) TextButton(onClick = { onClose(); shareFile(ctx, f) }) { Text("Share") }
+                TextButton(onClick = onClose) { Text("Close") }
+            }
+        },
+    )
 }
 
 private fun shareFile(ctx: Context, f: File) {

@@ -21,6 +21,9 @@ class AssignView(
 
 class CoursePage(val sections: List<LmsSection>, val assignDates: Map<Int, Pair<String?, String?>>)
 
+/** One entry of Moodle's Timeline (the dashboard's "what's due" list): something the student still has to do, with its deadline. */
+class TimelineEvent(val cmid: Int, val courseId: Int, val type: String, val name: String, val dueMs: Long, val action: String?)
+
 /** Reads Amizone's Home page and Moodle's pages. Pure text in, data out; throws [LmsFormatException] on anything unexpected. */
 object LmsParse {
     private val tagRx = Regex("<[^>]*>")
@@ -107,6 +110,49 @@ object LmsParse {
         val code = JSONObject(json.trim().removePrefix("[").removeSuffix("]")).optJSONObject("exception")?.optString("errorcode").orEmpty()
         code == "servicerequireslogin" || code == "requireloginerror" || code == "invalidsesskey" || code == "sessionerroruser"
     } catch (e: Exception) { false }
+
+    /**
+     * Moodle's Timeline answer (core_calendar_get_action_events_by_timesort). Moodle itself drops an entry once it is done (a
+     * quiz attempted, an assignment handed in), so being in here means "still to do". One entry per activity: its last deadline.
+     */
+    fun timeline(json: String): List<TimelineEvent> {
+        val root = try { org.json.JSONArray(json).getJSONObject(0) } catch (e: Exception) { throw LmsFormatException("timeline-api") }
+        if (root.optBoolean("error", true)) throw LmsFormatException("timeline-api")
+        val arr = root.optJSONObject("data")?.optJSONArray("events") ?: throw LmsFormatException("timeline-api")
+        return (0 until arr.length()).map { arr.getJSONObject(it) }.mapNotNull { e ->
+            val type = e.optString("modulename").ifBlank { return@mapNotNull null }
+            val cmid = Regex("[?&]id=(\\d+)").find(e.optString("url"))?.groupValues?.get(1)?.toIntOrNull() ?: return@mapNotNull null
+            val courseId = e.optJSONObject("course")?.optInt("id") ?: return@mapNotNull null
+            val name = oneLine(e.optString("activityname")).ifBlank { oneLine(e.optString("name")) }
+            TimelineEvent(cmid, courseId, type, name, e.optLong("timesort") * 1000, e.optJSONObject("action")?.optString("name")?.let { oneLine(it) }?.ifBlank { null })
+        }.groupBy { it.cmid }.map { (_, list) -> list.maxBy { it.dueMs } }
+    }
+
+    /** Moodle's notifications (message_popup_get_popup_notifications), newest first. "New sign in" notices are left out: they say nothing about a course. */
+    fun notifications(json: String): List<LmsUpdate> {
+        val root = try { org.json.JSONArray(json).getJSONObject(0) } catch (e: Exception) { throw LmsFormatException("notifications-api") }
+        if (root.optBoolean("error", true)) throw LmsFormatException("notifications-api")
+        val arr = root.optJSONObject("data")?.optJSONArray("notifications") ?: throw LmsFormatException("notifications-api")
+        return (0 until arr.length()).map { arr.getJSONObject(it) }.filterNot { n ->
+            n.optBoolean("deleted") || (n.optString("component") == "moodle" && n.optString("eventtype") == "newlogin")
+        }.map { n ->
+            LmsUpdate(
+                id = n.getLong("id"), at = n.optLong("timecreated") * 1000, kind = n.optString("component"),
+                // A forum post is named by its topic; anything else (a submission receipt, a grade) by Moodle's whole sentence,
+                // so "You have submitted ... for Assignment" never reads like an assignment still to do.
+                title = (if (n.optString("component") == "mod_forum") oneLine(n.optString("contexturlname")) else "").ifBlank { oneLine(n.optString("subject")) },
+                text = oneLine(n.optString("smallmessage")).ifBlank { oneLine(n.optString("subject")) },
+                url = n.optString("contexturl").takeIf { it.startsWith("https://") }, read = n.optBoolean("read"),
+            )
+        }.sortedByDescending { it.at }
+            // Moodle re-sends the same post's notification day after day: one row per page, the newest, unread if any copy is.
+            .groupBy { it.url ?: "id:${it.id}" }.values.map { same -> same.first().copy(read = same.all { it.read }) }
+    }
+
+    private val moodleDate: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy, h:mm a", Locale.ENGLISH)
+
+    /** A deadline written the way Moodle writes it ("Thursday, 22 October 2026, 4:20 PM"), so it reads the same as dates taken from pages. */
+    fun moodleText(ms: Long, zone: ZoneId = AMIZONE_ZONE): String = java.time.Instant.ofEpochMilli(ms).atZone(zone).format(moodleDate)
 
     // ------------------------------------------------------------ Moodle: a course page
 

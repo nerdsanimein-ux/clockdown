@@ -182,11 +182,10 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
             val result = withContext(Dispatchers.IO) {
                 // Attendance follows the timetable (same sign-in, so a dead sign-in is found once and not twice).
                 AmizoneSync.run(ctx, force = manual).also {
-                    if (it == SyncResult.OK) {
-                        AttendanceSync.run(ctx, minGapMs = if (manual) 0 else 60_000, force = manual)
-                        // The LMS rides along too, but gently: on opening the app at most every 15 minutes (pull down on the LMS tab to force it).
-                        LmsSync.run(ctx, force = manual, minGapMs = if (manual) 0 else 15 * 60_000L)
-                    }
+                    if (it == SyncResult.OK) AttendanceSync.run(ctx, minGapMs = if (manual) 0 else 60_000, force = manual)
+                    // The LMS rides along too, but gently: on opening the app at most every 15 minutes (pull down on the LMS tab to force it).
+                    // Its own session often outlives Amizone's, so it is tried even when Amizone's sign-in has lapsed.
+                    if (it != SyncResult.NO_SESSION) LmsSync.run(ctx, force = manual, minGapMs = if (manual) 0 else 15 * 60_000L)
                 }
             }
             syncing = false

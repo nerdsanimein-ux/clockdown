@@ -38,7 +38,8 @@ object LmsSync {
 
     private fun runLocked(ctx: Context, force: Boolean, minGapMs: Long): LmsResult {
         if (!ctx.amizoneConnected) return LmsResult.NO_SESSION
-        if (!force && ctx.sessionExpired) return LmsResult.EXPIRED
+        // An expired Amizone sign-in is NOT a reason to stop: the LMS has its own session, which often outlives Amizone's.
+        // Only a fresh LMS sign-on needs Amizone, and LmsSso refuses that without a network call while Amizone is known dead.
         val now = System.currentTimeMillis()
         if (minGapMs > 0 && now - LmsStore.triedAt(ctx) < minGapMs) return LmsResult.OK
         LmsStore.setTriedAt(ctx, now)
@@ -55,6 +56,16 @@ object LmsSync {
 
         var partial = false
         var failedKind = ""
+        // Moodle's own Timeline: everything with a deadline that is still to do, in every course. Assignments are also found on
+        // the course pages; quizzes and the rest only here. Null = it couldn't be read (what was known before is kept).
+        val timeline = try {
+            Thread.sleep(PAUSE_MS)
+            LmsParse.timeline(client.ajax("core_calendar_get_action_events_by_timesort", """{"limitnum":50,"timesortfrom":${now / 1000 - TIMELINE_BACK_S},"limittononsuspendedevents":true}"""))
+        } catch (e: LmsFormatException) { partial = true; failedKind = e.kind; null }
+        val updates = try {
+            Thread.sleep(PAUSE_MS)
+            LmsParse.notifications(client.ajax("message_popup_get_popup_notifications", """{"useridto":0,"newestfirst":true,"limit":$MAX_UPDATES,"offset":0}"""))
+        } catch (e: LmsFormatException) { partial = true; failedKind = e.kind; old?.updates.orEmpty() }
         val assigns = mutableListOf<LmsAssign>()
         val courses = list.mapIndexed { i, (id, name, short) ->
             if (i > 0) Thread.sleep(PAUSE_MS)
@@ -76,8 +87,23 @@ object LmsSync {
             }
             LmsCourse(id, name, short, page.sections, now)
         }
+        // What only the Timeline knows: an assignment not on its course page, a missing due date, and everything that isn't an assignment.
+        val known = assigns.associateBy { it.cmid }
+        for (e in timeline.orEmpty()) {
+            val a = known[e.cmid]
+            if (a != null) { if (a.dueMs == null) assigns[assigns.indexOf(a)] = a.copy(dueText = LmsParse.moodleText(e.dueMs), dueMs = e.dueMs); continue }
+            if (e.type == "assign") {
+                var n = LmsAssign(e.cmid, e.courseId, e.name, null, LmsParse.moodleText(e.dueMs), null, e.dueMs, null, null, null, null, null, null, "", emptyList(), 0)
+                Thread.sleep(PAUSE_MS)
+                try { n = withView(n, LmsParse.assignView(client.page(n.path)), now) } catch (ex: LmsFormatException) { partial = true; failedKind = ex.kind }
+                assigns += n
+            } else assigns += fromTimeline(e, now)
+        }
+        // Timeline unreadable this time: keep the non-assignments it gave last time rather than dropping them.
+        if (timeline == null) assigns += old?.assigns.orEmpty().filter { !it.isAssign && it.cmid !in known }
         val snap = LmsSnapshot(
-            client.root, LmsSession.label(ctx), if (partial) old?.updatedAt ?: now else now, partial, courses, assigns.sortedWith(compareBy({ it.dueMs ?: Long.MAX_VALUE }, { it.name })),
+            client.root, LmsSession.label(ctx), if (partial) old?.updatedAt ?: now else now, partial, courses,
+            assigns.distinctBy { it.cmid }.sortedWith(compareBy({ it.dueMs ?: Long.MAX_VALUE }, { it.name })), updates.take(MAX_UPDATES),
         )
         LmsStore.save(ctx, snap)
         LmsStore.setFailure(ctx, if (partial) "format" else null)
@@ -85,6 +111,14 @@ object LmsSync {
         changed(ctx)
         return if (partial) LmsResult.UNREADABLE else LmsResult.OK
     }
+
+    /** A quiz (or any other activity) with a deadline, as the Timeline gives it. Its status is Moodle's own action words ("Attempt quiz now"). */
+    internal fun fromTimeline(e: TimelineEvent, now: Long) = LmsAssign(
+        e.cmid, e.courseId, e.name, null, LmsParse.moodleText(e.dueMs), null, e.dueMs, e.action, SubStatus.NONE, null, null, null, null, "", emptyList(), now, e.type,
+    )
+
+    private const val TIMELINE_BACK_S = 14 * 86_400L // a deadline missed in the last two weeks still shows as overdue
+    private const val MAX_UPDATES = 40
 
     /** An assignment with what its own page says added (and its date, if the page has it and the course page didn't). */
     internal fun withView(a: LmsAssign, v: AssignView, now: Long): LmsAssign {
@@ -102,7 +136,7 @@ object LmsSync {
         synchronized(AttendanceSync) {
             try {
                 val old = LmsStore.load(ctx) ?: return LmsResult.FAILED
-                val a = old.assign(cmid) ?: return LmsResult.FAILED
+                val a = old.assign(cmid)?.takeIf { it.isAssign } ?: return LmsResult.FAILED
                 val v = try { LmsParse.assignView(LmsClient(ctx).page(a.path)) } catch (e: LmsFormatException) { throw LmsStop(LmsResult.UNREADABLE, e.kind) }
                 val now = System.currentTimeMillis()
                 LmsStore.save(ctx, old.copy(assigns = old.assigns.map { if (it.cmid == cmid) withView(it, v, now) else it }))
@@ -145,7 +179,7 @@ class LmsWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
 object LmsWakeups {
     /** Rides on the timetable's 6-hourly check (see SyncWorker): the LMS is read at most every 3 hours. */
     fun periodic(ctx: Context) {
-        if (!ctx.amizoneConnected || ctx.sessionExpired) return
+        if (!ctx.amizoneConnected) return
         LmsSync.run(ctx, minGapMs = 3 * 3_600_000L)
     }
 }
