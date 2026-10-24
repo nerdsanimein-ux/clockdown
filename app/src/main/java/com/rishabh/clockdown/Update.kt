@@ -4,15 +4,19 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageInfo
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
+import androidx.core.content.IntentCompat
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -282,6 +286,22 @@ object UpdateNotice {
 
     /** Once the app is up to date (or the release was withdrawn) the notification has nothing left to say. */
     fun cancel(ctx: Context) = ctx.getSystemService(NotificationManager::class.java).cancel(ID)
+
+    /** After an update installed without Android's screen, Clockdown just closed: this is the way back in. */
+    fun updated(ctx: Context) {
+        val p = ctx.prefs
+        if (!p.getBoolean(ApkInstaller.KEY_SELF_UPDATED, false)) return
+        p.edit().remove(ApkInstaller.KEY_SELF_UPDATED).apply()
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(CH, "App updates", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.notify(ID, Notification.Builder(ctx, CH)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("Clockdown updated to ${BuildConfig.VERSION_NAME}").setContentText("Tap to open.")
+            .setContentIntent(PendingIntent.getActivity(ctx, ID,
+                Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            .setAutoCancel(true).build())
+    }
 }
 
 sealed interface Download {
@@ -378,13 +398,65 @@ object ApkInstaller {
     fun permissionScreen(ctx: Context) =
         Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
+    const val KEY_SELF_UPDATED = "updSelfInstall"
+
+    /**
+     * Android 12+: installs through a PackageInstaller session that asks for no confirmation, which Android allows when
+     * an app updates itself. True if that started (Clockdown then closes on its own and [UpdateNotice.updated] offers to
+     * reopen it); false if Android's installer screen was shown instead.
+     */
+    fun install(ctx: Context, apk: File): Boolean {
+        if (Build.VERSION.SDK_INT >= 31) try { session(ctx, apk); return true } catch (e: Exception) { /* the screen below still works */ }
+        installWithScreen(ctx, apk)
+        return false
+    }
+
+    @RequiresApi(31)
+    private fun session(ctx: Context, apk: File) {
+        val installer = ctx.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+            setAppPackageName(ctx.packageName)
+            setSize(apk.length())
+            setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        }
+        val id = installer.createSession(params)
+        installer.openSession(id).use { s ->
+            try {
+                apk.inputStream().use { input -> s.openWrite("base.apk", 0, apk.length()).use { out -> input.copyTo(out); s.fsync(out) } }
+                ctx.prefs.edit().putBoolean(KEY_SELF_UPDATED, true).apply()
+                // Mutable: Android fills in the result. Explicit and not exported, so only Android's answer reaches it.
+                val result = Intent(ctx, InstallResultReceiver::class.java).putExtra("apk", apk.path)
+                s.commit(PendingIntent.getBroadcast(ctx, id, result, PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT).intentSender)
+            } catch (e: Exception) { s.abandon(); throw e }
+        }
+    }
+
     /** Hands the downloaded file to Android's installer through a content:// address (file:// is not allowed any more). */
-    fun install(ctx: Context, apk: File) {
+    fun installWithScreen(ctx: Context, apk: File) {
         val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", apk)
         ctx.startActivity(
             Intent(Intent.ACTION_VIEW)
                 .setDataAndType(uri, "application/vnd.android.package-archive")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
         )
+    }
+}
+
+/** Android's answer to [ApkInstaller.install]'s session. Success never arrives here: this process is replaced first. */
+class InstallResultReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+            // Android wants a confirmation after all (for example the first time on some phones): show its screen.
+            PackageInstaller.STATUS_PENDING_USER_ACTION ->
+                IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)?.let { ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            PackageInstaller.STATUS_SUCCESS -> {}
+            // The person said no on that screen: respect it.
+            PackageInstaller.STATUS_FAILURE_ABORTED -> ctx.prefs.edit().remove(ApkInstaller.KEY_SELF_UPDATED).apply()
+            // Anything else: the classic installer screen, which also explains what went wrong in Android's own words.
+            else -> {
+                ctx.prefs.edit().remove(ApkInstaller.KEY_SELF_UPDATED).apply()
+                intent.getStringExtra("apk")?.let(::File)?.takeIf { it.exists() }?.let { ApkInstaller.installWithScreen(ctx, it) }
+            }
+        }
     }
 }

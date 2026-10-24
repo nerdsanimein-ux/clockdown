@@ -20,6 +20,7 @@
                 <action android:name="com.rishabh.clockdown.DEBUG_SENTRY_TEST" />
                 <action android:name="com.rishabh.clockdown.DEBUG_FAKE_UPDATE" />
                 <action android:name="com.rishabh.clockdown.DEBUG_UPDATE_RUN" />
+                <action android:name="com.rishabh.clockdown.DEBUG_INSTALL" />
                 <action android:name="com.rishabh.clockdown.DEBUG_KEEPALIVE" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_TLS" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_SSO" />

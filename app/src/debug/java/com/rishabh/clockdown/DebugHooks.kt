@@ -110,6 +110,12 @@ class DebugHooks : BroadcastReceiver() {
                 setResultData("notified=${p.getInt("updNotifiedCode", 0)} available=${UpdateChecker.available(ctx)?.versionName}")
                 return
             }
+            // Installs cache/updates/test.apk (pushed with run-as) the way the update dialog does, skipping the download.
+            "com.rishabh.clockdown.DEBUG_INSTALL" -> {
+                val apk = java.io.File(ctx.cacheDir, "updates/test.apk")
+                setResultData(if (!apk.exists()) "missing ${apk.path}" else "session=${ApkInstaller.install(ctx, apk)}")
+                return
+            }
             // Runs the background update check's body now (the same function the real worker calls).
             "com.rishabh.clockdown.DEBUG_UPDATE_RUN" -> {
                 val pending = goAsync()

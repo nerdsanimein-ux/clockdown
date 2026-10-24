@@ -63,7 +63,10 @@ class AlarmReceiver : BroadcastReceiver() {
 
 class BootReceiver : BroadcastReceiver() {
     // Boot, app update, and clock/timezone changes all invalidate or shift scheduled alarms.
-    override fun onReceive(ctx: Context, intent: Intent) = async { Scheduler.rescheduleAll(ctx) }
+    override fun onReceive(ctx: Context, intent: Intent) = async {
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) UpdateNotice.updated(ctx)
+        Scheduler.rescheduleAll(ctx)
+    }
 }
 
 /** Shown over the lock screen by the alarm notification's full-screen intent. */

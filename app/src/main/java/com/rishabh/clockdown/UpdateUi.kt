@@ -116,6 +116,7 @@ private sealed interface Phase {
     data object Offer : Phase
     data object NeedPermission : Phase
     data object Downloading : Phase
+    data object Installing : Phase
     data class Problem(val text: String) : Phase
 }
 
@@ -132,7 +133,7 @@ fun UpdateDialog(info: UpdateInfo, onClose: () -> Unit) {
         phase = Phase.Downloading; progress = 0f
         job = scope.launch {
             when (val r = ApkDownloader.download(ctx, info) { progress = it }) {
-                is Download.Done -> { ApkInstaller.install(ctx, r.file); onClose() }
+                is Download.Done -> if (ApkInstaller.install(ctx, r.file)) phase = Phase.Installing else onClose()
                 Download.NoInternet -> phase = Phase.Problem("Couldn't reach the internet. Please check your connection and try again.")
                 Download.Interrupted -> phase = Phase.Problem("The download stopped before it finished. Please try again.")
                 Download.Gone -> {
@@ -192,6 +193,15 @@ fun UpdateDialog(info: UpdateInfo, onClose: () -> Unit) {
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { job?.cancel(); onClose() }) { Text("Cancel") } },
+        )
+
+        // Clockdown is replaced in a few seconds, which closes it; a notification then offers to open the new version.
+        Phase.Installing -> AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Installing update…") },
+            text = { Text("Clockdown will close in a moment while it updates. Tap the \"Clockdown updated\" notification to open it again.") },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = onClose) { Text("Close") } },
         )
 
         is Phase.Problem -> AlertDialog(

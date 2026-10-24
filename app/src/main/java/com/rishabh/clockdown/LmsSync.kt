@@ -155,7 +155,7 @@ object LmsSync {
 
     private fun stopped(ctx: Context, e: LmsStop): LmsResult {
         LmsStore.setFailure(ctx, when (e.result) { LmsResult.UNREADABLE -> "format"; LmsResult.EXPIRED, LmsResult.NO_SESSION -> "signin"; LmsResult.NO_LMS -> "nolms"; else -> "network" })
-        if (e.result == LmsResult.UNREADABLE || (e.result == LmsResult.FAILED && e.kind != "network")) report(ctx, e.kind)
+        if (e.result == LmsResult.UNREADABLE || (e.result == LmsResult.FAILED && e.kind !in listOf("network", "sso-network"))) report(ctx, e.kind)
         Scheduler.refreshWidget(ctx)
         return e.result
     }

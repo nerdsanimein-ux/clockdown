@@ -55,13 +55,21 @@ object Scheduler {
 
     internal fun exact(ctx: Context, at: Long, pi: PendingIntent) {
         val am = am(ctx)
-        // USE_EXACT_ALARM is auto-granted on 33+; on 31-32 fall back to inexact rather than crash.
-        if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+        // USE_EXACT_ALARM is auto-granted on 33+; on 31-32 it's SCHEDULE_EXACT_ALARM, which the user can turn off,
+        // so fall back to inexact rather than crash.
+        if (canExact(am)) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
         else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
     }
 
-    private fun alarmClock(ctx: Context, at: Long, id: Int, name: String, room: String) =
-        am(ctx).setAlarmClock(AlarmManager.AlarmClockInfo(at, openApp(ctx)), broadcast(ctx, ALARM, id, name, room))
+    private fun canExact(am: AlarmManager) = Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()
+
+    /** setAlarmClock needs exact-alarm access too (it threw SecurityException on Android 12 without it). */
+    private fun alarmClock(ctx: Context, at: Long, id: Int, name: String, room: String) {
+        val am = am(ctx)
+        val pi = broadcast(ctx, ALARM, id, name, room)
+        if (canExact(am)) am.setAlarmClock(AlarmManager.AlarmClockInfo(at, openApp(ctx)), pi)
+        else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+    }
 
     fun cancel(ctx: Context, id: Int) {
         am(ctx).cancel(broadcast(ctx, ALARM, id))
