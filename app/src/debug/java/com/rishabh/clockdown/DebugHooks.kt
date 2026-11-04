@@ -161,6 +161,27 @@ class DebugHooks : BroadcastReceiver() {
             "com.rishabh.clockdown.DEBUG_LMS_DUMP" -> { async2 { LmsDebug.dump(ctx) }; return }
             "com.rishabh.clockdown.DEBUG_LMS_COVERAGE" -> { async2 { LmsDebug.coverage(ctx) }; return }
             "com.rishabh.clockdown.DEBUG_LMS_STRUCTURE" -> { async2 { LmsDebug.structure(ctx) }; return }
+            // Reads one course's leaderboard the way the course screen does; reports timing and counts only.
+            "com.rishabh.clockdown.DEBUG_LMS_BOARD" -> {
+                val id = intent.getIntExtra("course", 0)
+                async2 { val t = System.currentTimeMillis(); val b = try { LmsParse.leaderboard(LmsClient(ctx).json("local/rank_tracker/get_widget.php?courseid=$id")) } catch (e: Throwable) { return@async2 "error=${e.javaClass.simpleName}: ${e.message} ms=${System.currentTimeMillis() - t}" }
+                    "ms=${System.currentTimeMillis() - t} rank=${b.rank} of=${b.students} modules=${b.modulesDone}/${b.modulesTotal} pct=${b.percent} rows=${b.rows.size} me=${b.rows.count { it.me }}" }
+                return
+            }
+            // Opens a Moodle page in the app's own signed-in viewer, for looking around by hand.
+            "com.rishabh.clockdown.DEBUG_LMS_OPEN" -> {
+                val base = LmsSession.base(ctx) ?: return setResultData("no LMS session")
+                ctx.startActivity(Intent(ctx, LmsWebActivity::class.java).putExtra("url", base + "/" + (intent.getStringExtra("path") ?: "my/")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                setResultData("opened"); return
+            }
+            "com.rishabh.clockdown.DEBUG_LMS_FETCH" -> {
+                // Slow pages outlive a broadcast: the summary goes to files/debug_fetch.txt (read with run-as).
+                val path = intent.getStringExtra("path") ?: "my/"
+                val out = java.io.File(ctx.filesDir, "debug_fetch.txt").apply { writeText("pending $path") }
+                val raw = intent.getBooleanExtra("raw", false)
+                kotlin.concurrent.thread { out.writeText(try { if (raw) LmsDebug.raw(ctx, path) else LmsDebug.fetch(ctx, path) } catch (e: Throwable) { "error=${e.javaClass.simpleName}: ${e.message?.take(100)}" }) }
+                setResultData("started"); return
+            }
             "com.rishabh.clockdown.DEBUG_LMS_REMIND" -> { val h = intent.getIntExtra("hours", 24); async2 { LmsDebug.remind(ctx, h) }; return }
             // Reads the newest scan with Android's own PdfRenderer and reports its page count and sizes (no content).
             "com.rishabh.clockdown.DEBUG_PDF_INFO" -> { async2 { LmsDebug.pdfInfo(ctx) }; return }
@@ -316,6 +337,28 @@ object LmsDebug {
         }
         val courses = LmsStore.load(ctx)?.courses.orEmpty().map { "course/view.php?id=${it.id}" }
         return (listOf("my/", "user/profile.php", "grade/report/overview/index.php") + courses).joinToString(" ## ") { shape(it).replace(Regex(" menu=\\[Home.*?Log out, ?"), " menu=[") }
+    }
+
+    /** One Moodle address, the body exactly as returned. Debug builds only. */
+    fun raw(ctx: Context, path: String): String {
+        val (base, cookie, ua) = LmsClient(ctx).credentials()
+        val slow = okhttp3.OkHttpClient.Builder().readTimeout(90, java.util.concurrent.TimeUnit.SECONDS).build()
+        return slow.newCall(okhttp3.Request.Builder().url("$base/$path").header("Cookie", cookie).header("User-Agent", ua).build()).execute().use { it.body.string() }
+    }
+
+    /** One Moodle page, summarised for exploring: title, headings and links (text -> address). Debug builds only. */
+    fun fetch(ctx: Context, path: String): String {
+        val (base, cookie, ua) = LmsClient(ctx).credentials()
+        val slow = okhttp3.OkHttpClient.Builder().readTimeout(90, java.util.concurrent.TimeUnit.SECONDS).callTimeout(120, java.util.concurrent.TimeUnit.SECONDS).build()
+        val html = slow.newCall(okhttp3.Request.Builder().url("$base/$path").header("Cookie", cookie).header("User-Agent", ua).build()).execute().use { it.body.string() }
+        fun clean(s: String) = s.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").replace("&amp;", "&").trim()
+        val title = Regex("<title>(.*?)</title>", RegexOption.DOT_MATCHES_ALL).find(html)?.groupValues?.get(1)?.let(::clean)
+        val heads = Regex("<h[1-4][^>]*>(.*?)</h[1-4]>", RegexOption.DOT_MATCHES_ALL).findAll(html).map { clean(it.groupValues[1]) }.filter { it.isNotEmpty() }.distinct().take(25).toList()
+        val links = Regex("<a\\b[^>]*href=\"([^\"#]+)\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL).findAll(html)
+            .map { clean(it.groupValues[2]).take(40) + " -> " + it.groupValues[1].replace("&amp;", "&").substringAfter("/moodle/").take(90) }
+            .filter { !it.startsWith(" ->") }.distinct().take(80).toList()
+        val words = listOf("leaderboard", "leader board", "ranking", "rank", "points", "xp", "level up", "badge").filter { html.contains(it, ignoreCase = true) }
+        return "len=${html.length} title=$title || heads=$heads || keywords=$words || links=$links"
     }
 
     fun remind(ctx: Context, hours: Int): String {

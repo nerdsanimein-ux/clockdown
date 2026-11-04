@@ -312,6 +312,10 @@ private fun LazyListScope.courses(snap: LmsSnapshot, onCourse: (Int) -> Unit) {
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(titleCase(c.name), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    // The group/section line Moodle shows on each course card: tells apart two courses with the same name.
+                    if (c.shortName.isNotBlank() && !c.shortName.equals(c.name, ignoreCase = true)) Text(
+                        c.shortName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                     Text(
                         if (c.readAt == 0L) "Not read yet" else "$items item${if (items == 1) "" else "s"}",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -366,6 +370,7 @@ private fun CourseScreen(snap: LmsSnapshot, course: LmsCourse, onBack: () -> Uni
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            item(key = "board") { Leaderboard(course.id) }
             val sections = course.sections.filter { it.items.isNotEmpty() }
             if (course.readAt == 0L) item { Text("This course hasn't been read yet. Go back and pull down to refresh.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             else if (sections.isEmpty()) item { Text("Nothing in this course yet.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -388,6 +393,48 @@ private fun CourseScreen(snap: LmsSnapshot, course: LmsCourse, onBack: () -> Uni
     }
 }
 
+/** Your place in the course and everyone's completion, as Moodle's "Leader Board" button shows it. Read each time the course opens. */
+@Composable
+private fun Leaderboard(courseId: Int) {
+    val ctx = LocalContext.current
+    // (still loading, result): a loading line holds the card's place, so the list doesn't scroll it out of view when it arrives.
+    val board by produceState<Pair<Boolean, LmsBoard?>>(true to null, courseId) { value = false to withContext(Dispatchers.IO) { LmsSync.leaderboard(ctx, courseId) } }
+    var everyone by rememberSaveable(courseId) { mutableStateOf(false) }
+    if (board.first) {
+        Text("🏆 Loading your rank in this course…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+        return
+    }
+    val b = board.second ?: return
+    if (b.rank == null && b.rows.isEmpty()) return
+    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🏆", style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        b.rank?.let { "#$it" + (b.students?.let { n -> " of $n" } ?: "") + " in this course" } ?: "Leaderboard",
+                        style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    val done = listOfNotNull(b.percent?.let { "$it done" }, if (b.modulesDone != null && b.modulesTotal != null) "${b.modulesDone} of ${b.modulesTotal} modules" else null)
+                    if (done.isNotEmpty()) Text(done.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+            if (b.rows.isNotEmpty()) TextButton(onClick = { everyone = !everyone }) { Text(if (everyone) "Hide the leaderboard" else "See the leaderboard (${b.rows.size})") }
+            if (everyone) b.rows.forEach { r ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${r.rank}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(32.dp), color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text(
+                        titleCase(r.name) + if (r.me) "  (you)" else "", style = if (r.me) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(r.percent, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ItemRow(item: LmsItem, a: LmsAssign?, busy: Boolean, onClick: () -> Unit, onShare: (() -> Unit)?) {
     val kind = when (item.type) {
@@ -401,6 +448,8 @@ private fun ItemRow(item: LmsItem, a: LmsAssign?, busy: Boolean, onClick: () -> 
             Column(Modifier.weight(1f)) {
                 Text(item.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(kind, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                item.dates?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp)) }
+                item.note?.let { Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)) }
                 if (a != null) StatusChip(a, Modifier.padding(top = 4.dp))
             }
             if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)

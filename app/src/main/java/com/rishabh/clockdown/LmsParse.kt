@@ -183,8 +183,9 @@ object LmsParse {
             // A label or a bare text block has no link and nothing to open: leave it out.
             if (name.isNullOrBlank() || !Regex("href=\"[^\"]*mod/$type/view\\.php").containsMatchIn(region)) continue
             val badge = Regex("class=\"[^\"]*\\bactivitybadge\\b[^\"]*\"[^>]*>(.*?)</span>", RegexOption.DOT_MATCHES_ALL).find(region)?.groupValues?.get(1)?.let { oneLine(it) }?.ifBlank { null }
-            section.items += LmsItem(cmid, type, name, badge)
-            if (type == "assign") dates[cmid] = activityDates(region).let { it["opened"] to it["due"] }
+            val shownDates = activityDates(region)
+            section.items += LmsItem(cmid, type, name, badge, itemNote(region), shownDates.entries.joinToString(" · ") { (k, v) -> k.replaceFirstChar(Char::uppercase) + ": " + v }.ifBlank { null })
+            if (type == "assign") dates[cmid] = shownDates.let { it["opened"] to it["due"] }
         }
         cur?.let { done += it }
         return CoursePage(done.map { LmsSection(it.number, it.title, it.items.toList()) }, dates)
@@ -195,6 +196,39 @@ object LmsParse {
         val end = listOf("data-for=\"sectioninfo\"", "data-for=\"cmlist\"").map { region.indexOf(it) }.filter { it >= 0 }.minOrNull() ?: region.length
         val h = Regex("<h\\d\\b[^>]*\\bsectionname\\b[^>]*>(.*?)</h\\d>", RegexOption.DOT_MATCHES_ALL).find(region.substring(0, end))
         return h?.let { oneLine(it.groupValues[1]) }.orEmpty().take(120)
+    }
+
+    // ------------------------------------------------------------ Amity's rank tracker: a course's leaderboard
+
+    private fun classText(html: String, cls: String) =
+        Regex("class=\"[^\"]*\\b${Regex.escape(cls)}\\b[^\"]*\"[^>]*>(.*?)</(?:div|span)>", RegexOption.DOT_MATCHES_ALL).find(html)?.groupValues?.get(1)?.let { oneLine(it) }
+
+    /** `local/rank_tracker/get_widget.php`: `{"success":true,"html":"..."}`, the panel Moodle shows. */
+    fun leaderboard(json: String): LmsBoard {
+        val html = try { JSONObject(json).takeIf { it.optBoolean("success") }?.optString("html") } catch (e: Exception) { null }
+            ?: throw LmsFormatException("leaderboard-api")
+        val modules = Regex("(\\d+)\\s*/\\s*(\\d+)\\s*modules").find(html)
+        val medals = mapOf("🥇" to 1, "🥈" to 2, "🥉" to 3)
+        val rows = html.split(Regex("(?=<div class=\"rkt-all-row)")).drop(1).mapIndexedNotNull { i, row ->
+            // The page's own "you" tag sits inside the name; the app marks you itself.
+            val name = classText(row.replace(Regex("<span class=\"rkt-you-tag\"[^>]*>.*?</span>"), ""), "rkt-all-name") ?: return@mapIndexedNotNull null
+            val rank = classText(row, "rkt-rank-sm")?.toIntOrNull() ?: medals[classText(row, "rkt-medal")] ?: (i + 1)
+            LmsBoardRow(rank, name.trimEnd('-', '.', ' '), classText(row, "rkt-all-score").orEmpty(), "rkt-lb-me" in row.substringBefore('>'))
+        }
+        val rank = classText(html, "rkt-rank-num")?.filter(Char::isDigit)?.toIntOrNull()
+        if (rank == null && rows.isEmpty()) throw LmsFormatException("leaderboard-format")
+        return LmsBoard(
+            rank, classText(html, "rkt-rank-sub")?.filter(Char::isDigit)?.toIntOrNull(),
+            modules?.groupValues?.get(1)?.toIntOrNull(), modules?.groupValues?.get(2)?.toIntOrNull(),
+            classText(html, "rkt-score-line")?.let { Regex("[\\d.]+%").find(it)?.value }, rows,
+        )
+    }
+
+    /** The teacher's note under an item (Moodle's `activity-description`), as one line of plain text, or null. */
+    fun itemNote(region: String): String? {
+        val at = region.indexOf("activity-altcontent")
+        if (at < 0) return null
+        return oneLine(region.substring(region.indexOf('>', at) + 1)).take(400).ifBlank { null }
     }
 
     /** `<strong>Due:</strong> Wednesday, 14 October 2026, 2:00 PM` pairs, keyed by lower-case label ("opened", "due"). */

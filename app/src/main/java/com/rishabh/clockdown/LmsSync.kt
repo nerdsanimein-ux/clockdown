@@ -132,6 +132,13 @@ object LmsSync {
     }
 
     /** Re-reads ONE assignment's page (after an upload, or when its screen opens). Never touches the rest. */
+    /** Call from a background thread. A course's leaderboard, read now; null if it couldn't be (no network, no session, changed shape). */
+    fun leaderboard(ctx: Context, courseId: Int): LmsBoard? = try {
+        LmsParse.leaderboard(LmsClient(ctx).json("local/rank_tracker/get_widget.php?courseid=$courseId"))
+    } catch (e: LmsFormatException) { report(ctx, e.kind); null }
+    catch (e: LmsStop) { null }
+    catch (e: IOException) { null }
+
     fun refreshAssign(ctx: Context, cmid: Int): LmsResult = synchronized(AmizoneSync) {
         synchronized(AttendanceSync) {
             try {

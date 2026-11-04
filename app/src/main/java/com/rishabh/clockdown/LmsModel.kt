@@ -13,11 +13,22 @@ import java.time.ZoneId
 enum class SubStatus { SUBMITTED, DRAFT, NONE, OTHER }
 
 /** One thing in a course (a file, a link, a quiz, an assignment...). Its page is `mod/<type>/view.php?id=<cmid>`. */
-data class LmsItem(val cmid: Int, val type: String, val name: String, val badge: String?) {
+data class LmsItem(
+    val cmid: Int, val type: String, val name: String, val badge: String?,
+    /** The teacher's short note under the item ("study material", the assignment's question...), as plain text. */
+    val note: String? = null,
+    /** Moodle's own date lines for it ("Opened: ... · Due: ..."), as plain text. */
+    val dates: String? = null,
+) {
     val path get() = "mod/$type/view.php?id=$cmid"
 }
 
 data class LmsSection(val number: Int, val title: String, val items: List<LmsItem>)
+
+/** A course's leaderboard, from Amity's rank tracker (the "Leader Board" button on Moodle's course page). Read on demand, never saved. */
+data class LmsBoard(val rank: Int?, val students: Int?, val modulesDone: Int?, val modulesTotal: Int?, val percent: String?, val rows: List<LmsBoardRow>)
+
+data class LmsBoardRow(val rank: Int, val name: String, val percent: String, val me: Boolean)
 
 /** [sections] is empty and [readAt] 0 until the course's own page has been read. */
 data class LmsCourse(val id: Int, val name: String, val shortName: String, val sections: List<LmsSection>, val readAt: Long)
@@ -128,6 +139,7 @@ object LmsStore {
             JSONObject().put("id", c.id).put("name", c.name).put("short", c.shortName).put("read", c.readAt).put("sections", JSONArray(c.sections.map { sec ->
                 JSONObject().put("n", sec.number).put("t", sec.title).put("items", JSONArray(sec.items.map { i ->
                     JSONObject().put("id", i.cmid).put("type", i.type).put("name", i.name).put("badge", i.badge ?: JSONObject.NULL)
+                        .put("note", i.note ?: JSONObject.NULL).put("dates", i.dates ?: JSONObject.NULL)
                 }))
             }))
         }))
@@ -145,6 +157,8 @@ object LmsStore {
         }))
 
     private fun JSONObject.s(k: String) = if (isNull(k)) null else getString(k)
+    /** Like [s], for fields that data saved by older versions doesn't have. */
+    private fun JSONObject.optS(k: String) = if (!has(k) || isNull(k)) null else getString(k)
     private fun JSONObject.l(k: String) = if (isNull(k)) null else getLong(k)
 
     fun fromJson(o: JSONObject): LmsSnapshot {
@@ -154,7 +168,7 @@ object LmsStore {
             o.getJSONArray("courses").map2 { c ->
                 LmsCourse(c.getInt("id"), c.getString("name"), c.getString("short"), c.getJSONArray("sections").map2 { sec ->
                     LmsSection(sec.getInt("n"), sec.getString("t"), sec.getJSONArray("items").map2 { i ->
-                        LmsItem(i.getInt("id"), i.getString("type"), i.getString("name"), i.s("badge"))
+                        LmsItem(i.getInt("id"), i.getString("type"), i.getString("name"), i.s("badge"), i.optS("note"), i.optS("dates"))
                     })
                 }, c.getLong("read"))
             },

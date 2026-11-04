@@ -32,6 +32,9 @@
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_DUMP" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_COVERAGE" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_STRUCTURE" />
+                <action android:name="com.rishabh.clockdown.DEBUG_LMS_FETCH" />
+                <action android:name="com.rishabh.clockdown.DEBUG_LMS_OPEN" />
+                <action android:name="com.rishabh.clockdown.DEBUG_LMS_BOARD" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_REMIND" />
                 <action android:name="com.rishabh.clockdown.DEBUG_STATS_PING" />
                 <action android:name="com.rishabh.clockdown.DEBUG_PDF_INFO" />

@@ -216,6 +216,9 @@ class LmsClient(private val ctx: Context) {
     /** A page's HTML, [path] relative to the semester's folder ("course/view.php?id=5"). */
     fun page(path: String): String = send(true) { LmsHttp.get("$base/$path", cookie, ua) }.body.also { if (sesskey == null) sesskey = LmsParse.sesskey(it) }
 
+    /** A JSON address under the semester's folder (Amity's own plugins, which aren't Moodle web services). */
+    fun json(path: String): String = send(false) { LmsHttp.get("$base/$path", cookie, ua) }.body
+
     /** One call of Moodle's own AJAX service (what its pages use); returns the raw JSON text. */
     fun ajax(method: String, argsJson: String): String {
         if (sesskey == null) page("my/courses.php")

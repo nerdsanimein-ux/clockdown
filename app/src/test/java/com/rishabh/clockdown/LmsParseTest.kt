@@ -295,4 +295,24 @@ class LmsParseTest {
         assertEquals("Google Sheets", viewerFor("xlsx")!!.first)
         assertNull(viewerFor("zip"))
     }
+
+    @Test
+    fun leaderboardReadsRankCompletionAndRows() {
+        val html = """<div class="rkt-inner"><div class="rkt-rank-hero"><div class="rkt-rank-num">#2</div><div class="rkt-rank-sub">out of 40 students</div></div>""" +
+            """<div class="rkt-prog-labels"><span>Course completion</span><span>7 / 20 modules</span></div><div class="rkt-score-line" style="color:#f59e0b">35% Completed</div>""" +
+            """<div class="rkt-all-list"><div class="rkt-all-row"><span class="rkt-medal">🥇</span><div class="rkt-all-info"><div class="rkt-all-name">ASHA K -.</div></div><span class="rkt-all-score">50%</span></div>""" +
+            """<div class="rkt-all-row rkt-lb-me"><span class="rkt-medal">🥈</span><div class="rkt-all-info"><div class="rkt-all-name">TEST USER -. <span class="rkt-you-tag">you</span></div></div><span class="rkt-all-score">35%</span></div>""" +
+            """<div class="rkt-all-row"><span class="rkt-rank-sm">9</span><div class="rkt-all-info"><div class="rkt-all-name">RAVI M -.</div></div><span class="rkt-all-score">0%</span></div></div></div>"""
+        val b = LmsParse.leaderboard(org.json.JSONObject().put("success", true).put("html", html).toString())
+        assertEquals(2, b.rank); assertEquals(40, b.students); assertEquals(7, b.modulesDone); assertEquals(20, b.modulesTotal); assertEquals("35%", b.percent)
+        assertEquals(listOf(1, 2, 9), b.rows.map { it.rank })
+        assertEquals("TEST USER", b.rows[1].name); assertTrue(b.rows[1].me); assertFalse(b.rows[0].me)
+        assertThrows(LmsFormatException::class.java) { LmsParse.leaderboard("""{"success":false}""") }
+    }
+
+    @Test
+    fun itemNoteIsTheDescriptionAsPlainText() {
+        assertEquals("study material", LmsParse.itemNote("""<a>x</a><div class="activity-altcontent text-break activity-description"> <div class="no-overflow"><p>study material</p></div> </div></div>"""))
+        assertNull(LmsParse.itemNote("<a>no description here</a>"))
+    }
 }
