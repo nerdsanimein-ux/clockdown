@@ -135,6 +135,9 @@ class LmsWebActivity : ComponentActivity() {
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            // Moodle's video player (video.js) starts its YouTube frame by script after the tap on its own play button; with the
+            // default "needs a tap inside the frame" rule the video sat loading forever.
+            settings.mediaPlaybackRequiresUserGesture = false
             // Dark mode: the WebView darkens Moodle itself (needs this activity's night theme, Theme.Clockdown.Web). Android 13+;
             // older phones show Moodle in its normal light colours, which stay readable.
             if (android.os.Build.VERSION.SDK_INT >= 33) settings.isAlgorithmicDarkeningAllowed = true
