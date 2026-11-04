@@ -168,6 +168,8 @@ class DebugHooks : BroadcastReceiver() {
                     "ms=${System.currentTimeMillis() - t} rank=${b.rank} of=${b.students} modules=${b.modulesDone}/${b.modulesTotal} pct=${b.percent} rows=${b.rows.size} me=${b.rows.count { it.me }}" }
                 return
             }
+            // Generic made-up data for screenshots (see DebugDemo).
+            "com.rishabh.clockdown.DEBUG_DEMO" -> { async2 { DebugDemo.load(ctx) }; return }
             // Opens a Moodle page in the app's own signed-in viewer, for looking around by hand.
             "com.rishabh.clockdown.DEBUG_LMS_OPEN" -> {
                 val base = LmsSession.base(ctx) ?: return setResultData("no LMS session")

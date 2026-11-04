@@ -134,7 +134,9 @@ object LmsSync {
     /** Re-reads ONE assignment's page (after an upload, or when its screen opens). Never touches the rest. */
     /** Call from a background thread. A course's leaderboard, read now; null if it couldn't be (no network, no session, changed shape). */
     fun leaderboard(ctx: Context, courseId: Int): LmsBoard? = try {
-        LmsParse.leaderboard(LmsClient(ctx).json("local/rank_tracker/get_widget.php?courseid=$courseId"))
+        // Debug builds only: the made-up leaderboard DebugDemo saves for screenshots.
+        val demo = if (BuildConfig.DEBUG) ctx.prefs.getString("debugBoardJson", null) else null
+        LmsParse.leaderboard(demo ?: LmsClient(ctx).json("local/rank_tracker/get_widget.php?courseid=$courseId"))
     } catch (e: LmsFormatException) { report(ctx, e.kind); null }
     catch (e: LmsStop) { null }
     catch (e: IOException) { null }
