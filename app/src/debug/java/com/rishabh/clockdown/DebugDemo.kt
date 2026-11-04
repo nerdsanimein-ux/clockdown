@@ -39,6 +39,7 @@ object DebugDemo {
             LmsSection(0, "MARKETING MANAGEMENT", listOf(
                 item(1, "forum", "Announcements"),
                 item(2, "resource", "Syllabus", "PDF", "syllabus"),
+                LmsItem(7, "video", "What is Marketing? - Explained in 5 Minutes", null, url = "https://www.youtube.com/watch?v=aaaaaaaaaaa"),
                 item(3, "assign", "Market Research Report", note = "Pick a product you use every day and explain who it is for, how it is priced and how it reaches you.",
                     dates = "Opened: Monday, 2 November 2026, 9:00 AM · Due: Saturday, 7 November 2026, 11:59 PM"),
                 item(4, "quiz", "Unit 1 Quiz", note = "Quiz", dates = "Opened: Thursday, 5 November 2026, 10:00 AM · Closes: Thursday, 12 November 2026, 5:00 PM"),
