@@ -423,7 +423,8 @@ object ApkInstaller {
         installer.openSession(id).use { s ->
             try {
                 apk.inputStream().use { input -> s.openWrite("base.apk", 0, apk.length()).use { out -> input.copyTo(out); s.fsync(out) } }
-                ctx.prefs.edit().putBoolean(KEY_SELF_UPDATED, true).apply()
+                // commit(), not apply(): the install replaces this process within seconds, before an apply() is written.
+                ctx.prefs.edit().putBoolean(KEY_SELF_UPDATED, true).commit()
                 // Mutable: Android fills in the result. Explicit and not exported, so only Android's answer reaches it.
                 val result = Intent(ctx, InstallResultReceiver::class.java).putExtra("apk", apk.path)
                 s.commit(PendingIntent.getBroadcast(ctx, id, result, PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT).intentSender)
