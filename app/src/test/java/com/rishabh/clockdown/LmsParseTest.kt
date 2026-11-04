@@ -311,6 +311,16 @@ class LmsParseTest {
     }
 
     @Test
+    fun sectionVideosFindYoutubeInTheDescriptionWithTheirTitles() {
+        val region = """<h3 class="sectionname">Module I</h3><div data-for="sectioninfo"><p>Read this first.</p>""" +
+            """<p>YouTube video: Measuring Personality - Crash Course Psychology 22</p><div class="mediaplugin"><div data-setup-lazy="{&quot;sources&quot;: [{&quot;type&quot;: &quot;video/youtube&quot;, &quot;src&quot;:&quot;https:\/\/www.youtube.com\/watch?v=sUrV6oZ3zsk&quot;}]}"></div>""" +
+            """<iframe src="https://www.youtube.com/embed/sUrV6oZ3zsk?enablejsapi=1"></iframe></div>""" +
+            """<p>And a plain link: <a href="https://youtu.be/abcdefghijk">watch</a></p></div>"""
+        assertEquals(listOf("sUrV6oZ3zsk" to "Measuring Personality - Crash Course Psychology 22", "abcdefghijk" to "Video"), LmsParse.sectionVideos(region))
+        assertTrue(LmsParse.sectionVideos("<p>no videos here</p>").isEmpty())
+    }
+
+    @Test
     fun itemNoteIsTheDescriptionAsPlainText() {
         assertEquals("study material", LmsParse.itemNote("""<a>x</a><div class="activity-altcontent text-break activity-description"> <div class="no-overflow"><p>study material</p></div> </div></div>"""))
         assertNull(LmsParse.itemNote("<a>no description here</a>"))

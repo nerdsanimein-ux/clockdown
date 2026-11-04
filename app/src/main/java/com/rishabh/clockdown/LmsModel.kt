@@ -19,6 +19,8 @@ data class LmsItem(
     val note: String? = null,
     /** Moodle's own date lines for it ("Opened: ... · Due: ..."), as plain text. */
     val dates: String? = null,
+    /** For a "video" (a YouTube video in a section's description, not a Moodle activity): its YouTube address. */
+    val url: String? = null,
 ) {
     val path get() = "mod/$type/view.php?id=$cmid"
 }
@@ -139,7 +141,7 @@ object LmsStore {
             JSONObject().put("id", c.id).put("name", c.name).put("short", c.shortName).put("read", c.readAt).put("sections", JSONArray(c.sections.map { sec ->
                 JSONObject().put("n", sec.number).put("t", sec.title).put("items", JSONArray(sec.items.map { i ->
                     JSONObject().put("id", i.cmid).put("type", i.type).put("name", i.name).put("badge", i.badge ?: JSONObject.NULL)
-                        .put("note", i.note ?: JSONObject.NULL).put("dates", i.dates ?: JSONObject.NULL)
+                        .put("note", i.note ?: JSONObject.NULL).put("dates", i.dates ?: JSONObject.NULL).put("url", i.url ?: JSONObject.NULL)
                 }))
             }))
         }))
@@ -168,7 +170,7 @@ object LmsStore {
             o.getJSONArray("courses").map2 { c ->
                 LmsCourse(c.getInt("id"), c.getString("name"), c.getString("short"), c.getJSONArray("sections").map2 { sec ->
                     LmsSection(sec.getInt("n"), sec.getString("t"), sec.getJSONArray("items").map2 { i ->
-                        LmsItem(i.getInt("id"), i.getString("type"), i.getString("name"), i.s("badge"), i.optS("note"), i.optS("dates"))
+                        LmsItem(i.getInt("id"), i.getString("type"), i.getString("name"), i.s("badge"), i.optS("note"), i.optS("dates"), i.optS("url"))
                     })
                 }, c.getLong("read"))
             },

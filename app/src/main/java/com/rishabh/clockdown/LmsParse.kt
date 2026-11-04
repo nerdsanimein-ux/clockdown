@@ -165,6 +165,7 @@ object LmsParse {
 
         class Open(val number: Int, val title: String, val items: MutableList<LmsItem> = mutableListOf())
         val done = mutableListOf<Open>()
+        val videos = mutableSetOf<String>() // each video once per course, even if two sections show it
         var cur: Open? = null
         val dates = mutableMapOf<Int, Pair<String?, String?>>()
         for ((n, t) in tags.withIndex()) {
@@ -172,7 +173,12 @@ object LmsParse {
             if (attr(t.value, "data-for") == "section") {
                 val number = attr(t.value, "data-number")?.toIntOrNull() ?: done.size + (if (cur != null) 1 else 0)
                 cur?.let { done += it }
-                cur = Open(number, sectionTitle(region))
+                cur = Open(number, sectionTitle(region)).also { s ->
+                    // YouTube videos the teacher put in the section's own description (they aren't activities).
+                    sectionVideos(region).filter { videos.add(it.first) }.forEach { (id, title) ->
+                        s.items += LmsItem(-(Math.floorMod(id.hashCode(), 1_000_000_000) + 1), "video", title, null, url = "https://www.youtube.com/watch?v=$id")
+                    }
+                }
                 continue
             }
             val section = cur ?: continue
@@ -222,6 +228,20 @@ object LmsParse {
             modules?.groupValues?.get(1)?.toIntOrNull(), modules?.groupValues?.get(2)?.toIntOrNull(),
             classText(html, "rkt-score-line")?.let { Regex("[\\d.]+%").find(it)?.value }, rows,
         )
+    }
+
+    // A YouTube address in any of the shapes Moodle's pages hold it (a link, an embed, or video.js's escaped `\/` JSON).
+    private val youtubeRx = Regex("""(?:youtube\.com\\?/(?:watch\?v=|embed\\?/)|youtu\.be\\?/)([A-Za-z0-9_-]{11})""")
+
+    /** (YouTube id, title) for each video in a section's description. The title is the "YouTube video: ..." line before it, if any. */
+    fun sectionVideos(region: String): List<Pair<String, String>> {
+        var from = 0
+        return youtubeRx.findAll(region).mapNotNull { m ->
+            val before = region.substring(from, m.range.first)
+            from = m.range.last + 1
+            val title = Regex("YouTube video:\\s*([^<]{3,160})", RegexOption.IGNORE_CASE).findAll(before).lastOrNull()?.groupValues?.get(1)?.let { oneLine(it) }
+            m.groupValues[1] to (title ?: "Video")
+        }.distinctBy { it.first }.toList()
     }
 
     /** The teacher's note under an item (Moodle's `activity-description`), as one line of plain text, or null. */

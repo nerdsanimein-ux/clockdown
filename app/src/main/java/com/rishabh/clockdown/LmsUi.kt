@@ -381,6 +381,7 @@ private fun CourseScreen(snap: LmsSnapshot, course: LmsCourse, onBack: () -> Uni
                     ItemRow(item, a, item.cmid in busy,
                         onClick = { when (item.type) {
                             "resource" -> file(item, share = false)
+                            "video" -> item.url?.let { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(it))) } } // the YouTube app, or the browser
                             "assign" -> if (a != null) onAssign(item.cmid) else LmsWebActivity.open(ctx, item.path)
                             "url" -> LmsWebActivity.open(ctx, item.path + "&redirect=1") // straight to the material, not Moodle's "click here" page
                             else -> LmsWebActivity.open(ctx, item.path)
@@ -439,7 +440,7 @@ private fun Leaderboard(courseId: Int) {
 private fun ItemRow(item: LmsItem, a: LmsAssign?, busy: Boolean, onClick: () -> Unit, onShare: (() -> Unit)?) {
     val kind = when (item.type) {
         "resource" -> "File" + (item.badge?.let { " · $it" } ?: ""); "url" -> "Link"; "quiz" -> "Quiz · opens in Moodle"; "wiki" -> "Wiki · opens in Moodle"
-        "assign" -> "Assignment"; "forum" -> "Forum · opens in Moodle"; "page" -> "Page · opens in Moodle"; "folder" -> "Folder · opens in Moodle"; else -> "Opens in Moodle"
+        "assign" -> "Assignment"; "video" -> "YouTube video"; "forum" -> "Forum · opens in Moodle"; "page" -> "Page · opens in Moodle"; "folder" -> "Folder · opens in Moodle"; else -> "Opens in Moodle"
     }
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable(onClick = onClick)) {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {

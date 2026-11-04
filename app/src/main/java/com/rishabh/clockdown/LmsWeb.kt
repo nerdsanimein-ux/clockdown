@@ -145,7 +145,7 @@ class LmsWebActivity : ComponentActivity() {
         }
         web = w
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() { if (w.canGoBack()) w.goBack() else finish() }
+            override fun handleOnBackPressed() { if (fullScreen != null) leaveFullScreen() else if (w.canGoBack()) w.goBack() else finish() }
         })
         setContent {
             ClockdownTheme {
@@ -203,7 +203,8 @@ class LmsWebActivity : ComponentActivity() {
     private fun client() = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
-            if (LoginDetector.allowedPage(url)) return false
+            // Inside a frame (a YouTube player in a section, say) the frame does its own thing: the page itself stays here.
+            if (!request.isForMainFrame || LoginDetector.allowedPage(url)) return false
             // Anything that isn't Amity's own site (a link in a course, a mailto) opens outside the app.
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
             // A course link opened straight through (Moodle redirects to it) leaves nothing to show here: don't stay behind as a blank page.
@@ -245,8 +246,26 @@ class LmsWebActivity : ComponentActivity() {
         }
     }
 
+    /** A video gone full screen (the player's own button): shown over everything until it closes or Back is pressed. */
+    private var fullScreen: Pair<android.view.View, WebChromeClient.CustomViewCallback>? = null
+
+    private fun leaveFullScreen() {
+        val (view, callback) = fullScreen ?: return
+        fullScreen = null
+        (window.decorView as android.widget.FrameLayout).removeView(view)
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        callback.onCustomViewHidden()
+    }
+
     private fun chrome() = object : WebChromeClient() {
         override fun onProgressChanged(view: WebView, newProgress: Int) { loadProgress = newProgress }
+        override fun onShowCustomView(view: android.view.View, callback: CustomViewCallback) {
+            leaveFullScreen()
+            fullScreen = view to callback
+            (window.decorView as android.widget.FrameLayout).addView(view, android.widget.FrameLayout.LayoutParams(-1, -1))
+            androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
+        override fun onHideCustomView() = leaveFullScreen()
         override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
             chooserCallback?.onReceiveValue(null) // a new request replaces an unanswered one
             chooserCallback = callback; chooserParams = params; chooser = true
@@ -316,10 +335,12 @@ class LmsWebActivity : ComponentActivity() {
             ctx.startActivity(Intent(ctx, LmsWebActivity::class.java).putExtra(EXTRA_URL, "$base/$path"))
         }
 
-        /** The same page in the phone's own browser (Chrome etc.). That browser has its own sign-in, separate from the app's. */
+        /**
+         * Amizone in the phone's own browser (Chrome etc.), where the LMS opens from Amizone's own LMS button. The browser keeps its
+         * own Amizone sign-in, separate from the app's: once signed in there, it stays signed in. [path] is the in-app fallback.
+         */
         fun openInBrowser(ctx: Context, path: String) {
-            val base = LmsSession.base(ctx) ?: return
-            runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("$base/$path")).addCategory(Intent.CATEGORY_BROWSABLE)) }
+            runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://s.amizone.net/Home")).addCategory(Intent.CATEGORY_BROWSABLE)) }
                 .onFailure { open(ctx, path) } // no browser on the phone: the in-app view still works
         }
 

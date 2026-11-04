@@ -55,6 +55,6 @@ object LmsText {
 
     fun emoji(type: String) = when (type) {
         "resource" -> "📄"; "url" -> "🔗"; "assign" -> "📝"; "quiz" -> "❓"; "wiki" -> "📚"; "forum" -> "💬"
-        "page" -> "📃"; "folder" -> "📁"; else -> "📎"
+        "page" -> "📃"; "folder" -> "📁"; "video" -> "🎬"; else -> "📎"
     }
 }
