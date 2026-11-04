@@ -316,6 +316,13 @@ class LmsWebActivity : ComponentActivity() {
             ctx.startActivity(Intent(ctx, LmsWebActivity::class.java).putExtra(EXTRA_URL, "$base/$path"))
         }
 
+        /** The same page in the phone's own browser (Chrome etc.). That browser has its own sign-in, separate from the app's. */
+        fun openInBrowser(ctx: Context, path: String) {
+            val base = LmsSession.base(ctx) ?: return
+            runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("$base/$path")).addCategory(Intent.CATEGORY_BROWSABLE)) }
+                .onFailure { open(ctx, path) } // no browser on the phone: the in-app view still works
+        }
+
         /** PDFs the scanner made earlier, newest first. */
         fun recentScans(ctx: Context): List<File> =
             File(ctx.filesDir, LmsStore.SCANS).listFiles { f -> f.isFile && f.name.endsWith(".pdf") }?.sortedByDescending { it.lastModified() }.orEmpty()

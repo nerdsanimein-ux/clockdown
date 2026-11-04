@@ -322,6 +322,10 @@ class LoginActivity : ComponentActivity() {
     private var pollsLeft = MAX_POLLS
     private var typedId = ""
     private var typedPassword = ""
+    /** When the login form last finished loading (0 = not yet), and the page's last alert: both only to explain a refusal. */
+    private var loginShownAt = 0L
+    private var lastAlert: String? = null
+    private var reloading = false
     private lateinit var web: WebView
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
@@ -372,6 +376,7 @@ class LoginActivity : ComponentActivity() {
                 web.visibility = View.VISIBLE
                 handler.removeCallbacksAndMessages(null)
                 pollsLeft = MAX_POLLS
+                reloading = true
                 web.reload()
             }
         }
@@ -400,6 +405,7 @@ class LoginActivity : ComponentActivity() {
         web.webChromeClient = object : WebChromeClient() {
             // The page explains itself with alerts ("Please complete the CAPTCHA"); show them instead of swallowing them.
             override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean {
+                lastAlert = message
                 Toast.makeText(this@LoginActivity, message, Toast.LENGTH_LONG).show(); result.confirm(); return true
             }
             // Diagnostics only (logcat, never uploaded): what the login page's own script had to say.
@@ -429,6 +435,11 @@ class LoginActivity : ComponentActivity() {
                 val cookies = CookieManager.getInstance().getCookie(SITE)
                 if (LoginDetector.signedIn(url, cookies)) { signedIn(view, cookies!!); return }
                 if (isLoginPage(url)) {
+                    // The form loading a second time (not via Retry) means Login was pressed and Amizone said no.
+                    val refusedAfter = if (loginShownAt > 0 && !reloading) (System.currentTimeMillis() - loginShownAt) / 1000 else null
+                    loginShownAt = System.currentTimeMillis()
+                    reloading = false
+                    if (refusedAfter != null) explainRefusal(auto.failedAfterSubmit(), refusedAfter)
                     if (auto.failedAfterSubmit()) return failAfterSubmit() // we submitted and Amizone sent us back here
                     startPolling()
                 }
@@ -458,7 +469,47 @@ class LoginActivity : ComponentActivity() {
             }
         }
         setContentView(root)
+        clearPortalCookies()
         web.loadUrl(SITE)
+    }
+
+    /**
+     * Starts every sign-in from a clean slate, like a fresh install: cookies left from an earlier Amizone session (long
+     * expired on Amizone's side) are dropped, so they can't get mixed into the new attempt. Only s.amizone.net's own
+     * cookies; the LMS and the captcha provider keep theirs.
+     */
+    private fun clearPortalCookies() {
+        val cm = CookieManager.getInstance()
+        cm.getCookie(SITE).orEmpty().split(';').map { it.substringBefore('=').trim() }.filter { it.isNotEmpty() }.forEach { name ->
+            cm.setCookie(SITE, "$name=; Max-Age=0; path=/")
+            cm.setCookie(SITE, "$name=; Max-Age=0; path=/; domain=.amizone.net")
+        }
+        cm.flush()
+    }
+
+    /** Amizone sent the form back after Login: say so plainly (with Amizone's own words if it gave any) and report the facts. */
+    private fun explainRefusal(byApp: Boolean, seconds: Long) {
+        val alert = lastAlert.also { lastAlert = null }
+        web.evaluateJavascript(LoginScripts.READ_ERROR) { raw ->
+            // evaluateJavascript hands the string back JSON-quoted.
+            val shown = runCatching { org.json.JSONArray("[$raw]").getString(0) }.getOrNull()?.replace('\n', ' ')?.trim()?.takeIf { it.isNotEmpty() }
+            val message = shown ?: alert
+            CrashReporting.noteLoginRefused(byApp, seconds, networkKind(), message)
+            if (!byApp && !done) say(
+                "Amizone didn't accept that sign-in" + (message?.let { ": \"$it\"" } ?: ".") +
+                    " Check your ID and password, complete the captcha again, and press Login straight after it turns green.",
+            )
+        }
+    }
+
+    private fun networkKind(): String {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "none"
+        return when {
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+            else -> "other"
+        }
     }
 
     /** The page didn't load: network, HTTP or TLS error, or nothing happened for [LOAD_TIMEOUT_MS]. Never for a page
@@ -530,7 +581,9 @@ class LoginActivity : ComponentActivity() {
             say("Your saved login was refused earlier, so it isn't filled in. Please type your Amizone ID and password.")
         }
 
-        if (auto.decide(s) == AutoStep.SUBMIT) {
+        // Press Login only on exactly the saved details we filled in: never on something half-typed or changed by the person.
+        val onSavedDetails = saved != null && s.typedId == saved.first && s.typedPassword == saved.second
+        if (onSavedDetails && auto.decide(s) == AutoStep.SUBMIT) {
             auto.markSubmitted() // exactly once per login screen, no matter what happens next
             prefs.edit().putLong("autoLoginAt", System.currentTimeMillis()).apply()
             say("Signing in…")

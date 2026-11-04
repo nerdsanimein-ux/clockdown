@@ -149,6 +149,14 @@ object LoginScripts {
         """.trimIndent()
     }
 
+    /** Amizone's own error text on the login page, if any (for example "Invalid captcha"). Never reads the form's values. */
+    val READ_ERROR = """
+        (function () {
+          var e = document.querySelector('.validation-summary-errors, .text-danger, .field-validation-error, .alert-danger, .ajs-message');
+          return e ? e.innerText.trim().slice(0, 200) : '';
+        })()
+    """.trimIndent()
+
     /**
      * Presses the page's own Login button. That runs the page's own validation (which checks for the token and for a
      * real touch), exactly as if the user had tapped it. This is deliberately NOT form.submit(), which would skip it.

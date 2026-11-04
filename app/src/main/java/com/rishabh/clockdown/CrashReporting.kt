@@ -79,6 +79,25 @@ object CrashReporting {
     }
 
     /**
+     * Amizone's sign-in page came back after Login was pressed: the attempt was refused. Only non-secret facts go out:
+     * who pressed Login (the person or the app), seconds spent on the page, Wi-Fi or mobile data, the WebView version,
+     * and Amizone's own error text if it showed one (scrubbed). Never the ID, password, captcha token or the URL.
+     */
+    fun noteLoginRefused(auto: Boolean, secondsOnPage: Long, network: String, amizoneMessage: String?) {
+        if (!Sentry.isEnabled()) return
+        val event = SentryEvent().apply {
+            level = SentryLevel.WARNING
+            message = Message().apply { formatted = "Amizone refused the sign-in"; message = formatted }
+        }
+        event.setTag("login.pressedBy", if (auto) "app" else "person")
+        event.setTag("login.secondsOnPage", secondsOnPage.toString())
+        event.setTag("login.network", network)
+        WebView.getCurrentWebViewPackage()?.versionName?.let { event.setTag("login.webviewVersion", it) }
+        scrub(amizoneMessage)?.takeIf { it.isNotBlank() }?.let { event.setExtra("amizoneMessage", it.take(200)) }
+        Sentry.captureEvent(event)
+    }
+
+    /**
      * Amizone's attendance page changed shape and couldn't be read. Only the failure TYPE goes out ("list-format" or
      * "history-format") - never any attendance, course, name or page content. Device model and Android version ride along.
      */

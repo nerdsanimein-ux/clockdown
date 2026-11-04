@@ -10,6 +10,7 @@
             <intent-filter>
                 <action android:name="com.rishabh.clockdown.DEBUG_CORRUPT_PASSWORD" />
                 <action android:name="com.rishabh.clockdown.DEBUG_EXPIRE_SESSION" />
+                <action android:name="com.rishabh.clockdown.DEBUG_STALE_WEB_COOKIES" />
                 <action android:name="com.rishabh.clockdown.DEBUG_RESET_BATTERY_PROMPT" />
                 <action android:name="com.rishabh.clockdown.DEBUG_STATUS" />
                 <action android:name="com.rishabh.clockdown.DEBUG_SYNC" />
@@ -29,6 +30,8 @@
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_KEYS" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_EXPIRE" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_DUMP" />
+                <action android:name="com.rishabh.clockdown.DEBUG_LMS_COVERAGE" />
+                <action android:name="com.rishabh.clockdown.DEBUG_LMS_STRUCTURE" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_REMIND" />
                 <action android:name="com.rishabh.clockdown.DEBUG_STATS_PING" />
                 <action android:name="com.rishabh.clockdown.DEBUG_PDF_INFO" />

@@ -119,7 +119,7 @@ private fun LmsHome(
         topBar = {
             TopAppBar(
                 title = { Text("LMS", style = MaterialTheme.typography.headlineMedium) },
-                actions = { if (connected && snap != null) TextButton(onClick = { LmsWebActivity.open(ctx, "my/courses.php") }) { Text("Open in browser") } },
+                actions = { if (connected && snap != null) TextButton(onClick = { LmsWebActivity.openInBrowser(ctx, "my/courses.php") }) { Text("Open in browser") } },
             )
         },
     ) { padding ->
@@ -357,7 +357,7 @@ private fun CourseScreen(snap: LmsSnapshot, course: LmsCourse, onBack: () -> Uni
             TopAppBar(
                 title = { Text(titleCase(course.name), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-                actions = { TextButton(onClick = { LmsWebActivity.open(ctx, "course/view.php?id=${course.id}") }) { Text("Open in browser") } },
+                actions = { TextButton(onClick = { LmsWebActivity.openInBrowser(ctx, "course/view.php?id=${course.id}") }) { Text("Open in browser") } },
             )
         },
     ) { padding ->
@@ -493,7 +493,7 @@ private fun AssignmentScreen(snap: LmsSnapshot, a: LmsAssign, now: Long, onBack:
             TopAppBar(
                 title = { Text("Assignment", style = MaterialTheme.typography.titleLarge) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-                actions = { TextButton(onClick = { LmsWebActivity.open(ctx, a.path) }) { Text("Open in browser") } },
+                actions = { TextButton(onClick = { LmsWebActivity.openInBrowser(ctx, a.path) }) { Text("Open in browser") } },
             )
         },
     ) { padding ->

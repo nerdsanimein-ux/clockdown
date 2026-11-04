@@ -20,6 +20,14 @@ class DebugHooks : BroadcastReceiver() {
             // Simulates a dead session: the cookies are replaced with ones the portal will refuse.
             "com.rishabh.clockdown.DEBUG_EXPIRE_SESSION" ->
                 Session.save(ctx, "ASP.NET_SessionId=invalid; .ASPXAUTH=invalid", Session.userAgent(ctx) ?: "Clockdown-test")
+            // A returning student's phone: the sign-in WebView still holds cookies from a session Amizone has since ended.
+            "com.rishabh.clockdown.DEBUG_STALE_WEB_COOKIES" -> {
+                val cm = android.webkit.CookieManager.getInstance()
+                listOf("ASP.NET_SessionId=staleSession000000000000", ".ASPXAUTH=STALE0000000000000000000000000000").forEach { cm.setCookie("https://s.amizone.net", "$it; path=/; secure") }
+                cm.flush()
+                setResultData("cookie names now: " + cm.getCookie("https://s.amizone.net").orEmpty().split(';').joinToString { it.substringBefore('=').trim() })
+                return
+            }
             // Runs one real sync now and reports the outcome and, if it failed, why (a label, never content).
             "com.rishabh.clockdown.DEBUG_SYNC" -> {
                 val pending = goAsync()
@@ -151,6 +159,8 @@ class DebugHooks : BroadcastReceiver() {
             "com.rishabh.clockdown.DEBUG_LMS_KEYS" -> { val step = intent.getStringExtra("step") ?: "init"; async2 { LmsDebug.keys(ctx, step) }; return }
             "com.rishabh.clockdown.DEBUG_LMS_EXPIRE" -> LmsSession.save(ctx, LmsSession.base(ctx) ?: "https://alms06.amizone.net/moodle_26odd", "MoodleSession=invalid", LmsSession.label(ctx))
             "com.rishabh.clockdown.DEBUG_LMS_DUMP" -> { async2 { LmsDebug.dump(ctx) }; return }
+            "com.rishabh.clockdown.DEBUG_LMS_COVERAGE" -> { async2 { LmsDebug.coverage(ctx) }; return }
+            "com.rishabh.clockdown.DEBUG_LMS_STRUCTURE" -> { async2 { LmsDebug.structure(ctx) }; return }
             "com.rishabh.clockdown.DEBUG_LMS_REMIND" -> { val h = intent.getIntExtra("hours", 24); async2 { LmsDebug.remind(ctx, h) }; return }
             // Reads the newest scan with Android's own PdfRenderer and reports its page count and sizes (no content).
             "com.rishabh.clockdown.DEBUG_PDF_INFO" -> { async2 { LmsDebug.pdfInfo(ctx) }; return }
@@ -269,6 +279,43 @@ object LmsDebug {
         val s = LmsStore.load(ctx) ?: return "no snapshot"
         return s.courses.joinToString(" ## ") { c -> "course(${c.id}) sections=" + c.sections.joinToString("|") { "${it.number}:'${it.title}'(${it.items.size})" } } +
             " ## assign dates: " + s.assigns.joinToString { "${it.cmid}: open=${it.openText != null} due=${it.dueText != null} dueMs=${it.dueMs != null} status=${it.status}/'${it.statusText}' grading='${it.gradingText}' remaining='${it.remainingText}' comments=${it.comments} introChars=${it.intro.length}" }
+    }
+
+    /** Per course: activities Moodle lists (by type) against what the parser kept, and why the rest were dropped. Counts and types only. */
+    fun coverage(ctx: Context): String {
+        val client = LmsClient(ctx)
+        val typeRx = Regex("\\bmodtype_([a-z0-9_]+)")
+        return (LmsStore.load(ctx)?.courses ?: return "no snapshot").joinToString(" ## ") { c ->
+            Thread.sleep(800)
+            val html = client.page("course/view.php?id=${c.id}")
+            val listed = Regex("<li\\b[^>]*data-for=\"cmitem\"[^>]*>").findAll(html).map { typeRx.find(it.value)?.groupValues?.get(1) ?: "?" }.toList()
+            val kept = LmsParse.coursePage(html).sections.flatMap { it.items }.map { it.type }
+            val dropped = (listed.groupingBy { it }.eachCount().mapValues { (t, n) -> n - kept.count { it == t } }).filterValues { it > 0 }
+            val sections = Regex("<li\\b[^>]*data-for=\"section\"[^>]*>").findAll(html).count()
+            val sectionLinks = Regex("course/section\\.php\\?id=\\d+|course/view\\.php\\?id=${c.id}(&amp;|&)section=\\d+").findAll(html).map { it.value }.toSet().size
+            val format = Regex("\\bformat-([a-z0-9_]+)").find(html)?.groupValues?.get(1)
+            // Courses with fewer activities than sections: count what each section's own page lists.
+            val onSectionPages = if (listed.size >= sections) null else Regex("course/section\\.php\\?id=(\\d+)").findAll(html).map { it.groupValues[1] }.toSet().sumOf { sid ->
+                Thread.sleep(800)
+                Regex("<li\\b[^>]*data-for=\"cmitem\"[^>]*>").findAll(client.page("course/section.php?id=$sid")).count()
+            }
+            "course(${c.id}) format=$format sections=$sections sectionPageLinks=$sectionLinks listed=${listed.size} kept=${kept.size} dropped=$dropped onSectionPages=$onSectionPages"
+        }
+    }
+
+    /** The building blocks of Moodle pages: block names, plugin paths linked, and primary-menu labels. Structure only, no content. */
+    fun structure(ctx: Context): String {
+        val client = LmsClient(ctx)
+        fun shape(path: String): String {
+            Thread.sleep(800)
+            val html = client.page(path)
+            val blocks = Regex("data-block=\"([a-z0-9_]+)\"").findAll(html).map { it.groupValues[1] }.toSortedSet()
+            val plugins = Regex("/moodle/((?:blocks|local|mod|report|grade|badges|user|calendar|message)/[a-z0-9_]+)").findAll(html).map { it.groupValues[1] }.toSortedSet()
+            val menu = Regex("<a[^>]*role=\"menuitem\"[^>]*>\\s*([^<]{2,40}?)\\s*</a>").findAll(html).map { it.groupValues[1].trim() }.toSet()
+            return "$path: blocks=$blocks plugins=$plugins menu=$menu"
+        }
+        val courses = LmsStore.load(ctx)?.courses.orEmpty().map { "course/view.php?id=${it.id}" }
+        return (listOf("my/", "user/profile.php", "grade/report/overview/index.php") + courses).joinToString(" ## ") { shape(it).replace(Regex(" menu=\\[Home.*?Log out, ?"), " menu=[") }
     }
 
     fun remind(ctx: Context, hours: Int): String {
