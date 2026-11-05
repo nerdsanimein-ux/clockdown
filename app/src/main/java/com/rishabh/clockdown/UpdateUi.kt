@@ -51,6 +51,9 @@ private fun ago(ms: Long): String {
 }
 
 /** Settings > "About and updates": the current version, a manual check, and the update dialog. */
+/** Clockdown's privacy policy (GitHub Pages, gh-pages branch); Google Play requires a link to it inside the app. */
+const val PRIVACY_URL = "https://nerdsanimein-ux.github.io/clockdown/privacy.html"
+
 @Composable
 fun UpdatesGroup() {
     val ctx = LocalContext.current
@@ -81,6 +84,17 @@ fun UpdatesGroup() {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Version", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             Text(UpdateChecker.installedName(ctx), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row(
+            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
+                .clickable { runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(PRIVACY_URL))) } }
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Privacy policy", style = MaterialTheme.typography.titleMedium)
+                Text("What Clockdown keeps on your phone, and the little it sends", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         // The Play build: updates come from Google Play, so this opens Clockdown's Play page instead of checking GitHub.
         if (!BuildConfig.SELF_UPDATE) Row(
