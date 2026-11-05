@@ -82,7 +82,24 @@ fun UpdatesGroup() {
             Text("Version", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             Text(UpdateChecker.installedName(ctx), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Row(
+        // The Play build: updates come from Google Play, so this opens Clockdown's Play page instead of checking GitHub.
+        if (!BuildConfig.SELF_UPDATE) Row(
+            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
+                .clickable {
+                    val market = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=${ctx.packageName}"))
+                    runCatching { ctx.startActivity(market) }.onFailure {
+                        runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://play.google.com/store/apps/details?id=${ctx.packageName}"))) }
+                    }
+                }
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Check for updates", style = MaterialTheme.typography.titleMedium)
+                Text("Updates come through Google Play. Tap to open Clockdown there.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        else Row(
             Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
                 .clickable(enabled = !checking) { check(revalidate = update != null) }
                 .padding(vertical = 6.dp),

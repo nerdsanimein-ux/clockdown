@@ -29,6 +29,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Where crash reports go. Lives in local.properties (git-ignored); empty means crash reporting is simply off.
         buildConfigField("String", "SENTRY_DSN", "\"${localProps.getProperty("sentry.dsn", "")}\"")
+        // The GitHub build updates itself from GitHub Releases; the Play build ("play" below) leaves updates to Google Play.
+        buildConfigField("boolean", "SELF_UPDATE", "true")
     }
 
     signingConfigs {
@@ -52,6 +54,13 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        // Google Play: the same app and signing key as release, without the GitHub self-updater and its install permissions
+        // (src/play/AndroidManifest.xml). Build it with ./gradlew bundlePlay -> app/build/outputs/bundle/play/app-play.aab.
+        create("play") {
+            initWith(getByName("release"))
+            matchingFallbacks += "release"
+            buildConfigField("boolean", "SELF_UPDATE", "false")
         }
     }
     compileOptions {

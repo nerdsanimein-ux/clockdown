@@ -232,10 +232,12 @@ object UpdateChecker {
 
     private fun engine(ctx: Context) = UpdateEngine(client, "https://api.github.com", PrefsUpdateStore(ctx.prefs), installedCode = { installedCode(ctx) })
 
-    fun available(ctx: Context): UpdateInfo? = engine(ctx).available()
+    // The Play build never looks at GitHub and never offers an update: Google Play does that (BuildConfig.SELF_UPDATE).
+    fun available(ctx: Context): UpdateInfo? = if (BuildConfig.SELF_UPDATE) engine(ctx).available() else null
     fun lastChecked(ctx: Context) = engine(ctx).lastChecked()
     fun forget(ctx: Context) = engine(ctx).forget()
     fun check(ctx: Context, mode: CheckMode): CheckResult {
+        if (!BuildConfig.SELF_UPDATE) return CheckResult.CURRENT
         // Debug builds only: a faked release (see DebugHooks) must not be wiped by the real GitHub answer. Dead code in release.
         if (BuildConfig.DEBUG && ctx.prefs.getBoolean("debugFakeUpdate", false)) return if (available(ctx) != null) CheckResult.UPDATE else CheckResult.CURRENT
         return engine(ctx).check(mode)
