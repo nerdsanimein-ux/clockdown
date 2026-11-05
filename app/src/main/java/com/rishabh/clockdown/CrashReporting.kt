@@ -97,6 +97,18 @@ object CrashReporting {
         Sentry.captureEvent(event)
     }
 
+    /** The sign-in page's captcha didn't finish within 45 seconds. Wi-Fi or mobile data and the WebView version only. */
+    fun noteCaptchaStuck(network: String) {
+        if (!Sentry.isEnabled()) return
+        val event = SentryEvent().apply {
+            level = SentryLevel.WARNING
+            message = Message().apply { formatted = "Amizone captcha didn't finish"; message = formatted }
+        }
+        event.setTag("login.network", network)
+        WebView.getCurrentWebViewPackage()?.versionName?.let { event.setTag("login.webviewVersion", it) }
+        Sentry.captureEvent(event)
+    }
+
     /**
      * Amizone's attendance page changed shape and couldn't be read. Only the failure TYPE goes out ("list-format" or
      * "history-format") - never any attendance, course, name or page content. Device model and Android version ride along.

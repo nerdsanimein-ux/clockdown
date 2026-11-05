@@ -368,6 +368,10 @@ class LoginActivity : ComponentActivity() {
             settings.allowContentAccess = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         }
+        // The captcha (Cloudflare Turnstile) runs in its own frame inside Amizone's page and keeps its state in its own cookies.
+        // WebViews refuse such third-party cookies by default; on mobile data, where Cloudflare asks for a fuller check, the
+        // captcha then never finishes ("Verifying..." forever) and Amizone refuses the login. Only this sign-in WebView allows them.
+        CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
         val retryButton = Button(this).apply {
             text = "Retry"
             setOnClickListener {
@@ -416,7 +420,9 @@ class LoginActivity : ComponentActivity() {
         }
         web.webViewClient = object : WebViewClient() {
             // Only the portal and its captcha provider may take over the page: no way to be steered to a look-alike site.
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = !LoginDetector.allowedPage(request.url.toString())
+            // Frames inside the page (the captcha's own about:blank/blob: helpers) are left alone: blocking them stalled the captcha.
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) =
+                request.isForMainFrame && !LoginDetector.allowedPage(request.url.toString())
 
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                 if (done) return
@@ -567,7 +573,15 @@ class LoginActivity : ComponentActivity() {
         }
     }
 
+    private var captchaStuckNoted = false
+
     private fun onState(s: LoginPageState) {
+        // The captcha still hasn't finished long after the page loaded: say what helps, and tell the developer once per screen.
+        if (!s.tokenReady && !captchaStuckNoted && loginShownAt > 0 && System.currentTimeMillis() - loginShownAt > CAPTCHA_STUCK_MS) {
+            captchaStuckNoted = true
+            CrashReporting.noteCaptchaStuck(networkKind())
+            say("The captcha is taking too long. Tap Retry at the bottom, or switch between Wi-Fi and mobile data. If it keeps happening, update \"Android System WebView\" and Chrome from the Play Store.")
+        }
         // Remember what is typed (memory only), to save it if the sign-in turns out to succeed.
         if (s.typedId.isNotEmpty() && s.typedPassword.isNotEmpty()) { typedId = s.typedId; typedPassword = s.typedPassword }
 
@@ -601,6 +615,7 @@ class LoginActivity : ComponentActivity() {
         const val POLL_MS = 500L
         const val MAX_POLLS = 240              // two minutes of watching the page, then leave it to the user
         const val WATCHDOG_MS = 20_000L
+        const val CAPTCHA_STUCK_MS = 45_000L   // Turnstile normally finishes in a few seconds
         const val LOAD_TIMEOUT_MS = 20_000L    // nothing loaded after this long: stop waiting and offer Retry
         const val COOL_DOWN_MS = 2 * 60_000L   // a new login screen within this long of an automatic attempt won't auto-submit
     }
