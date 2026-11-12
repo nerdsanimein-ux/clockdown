@@ -460,6 +460,8 @@ private fun HomeScreen(
                 AssistChip(onClick = onAddWidget, label = { Text("Add widget to home screen") }, leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp)) })
             }
 
+            if (BuildConfig.SELF_UPDATE) item(key = "moved-to-play", span = full) { MovedToPlayCard() } // GitHub build only
+
             if (connected) item(key = "attendance", span = full) { AttendanceCard(attendance, attFailure, expired, onAttendance) }
             if (connected) item(key = "holidays", span = full) { HolidaysCard(holidays, onHolidays) }
 

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
@@ -20,7 +19,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -33,22 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.util.concurrent.TimeUnit
-
-private fun ago(ms: Long): String {
-    if (ms == 0L) return "never"
-    val min = TimeUnit.MILLISECONDS.toMinutes(System.currentTimeMillis() - ms)
-    return when {
-        min < 1 -> "just now"
-        min < 60 -> "$min minutes ago"
-        min < 60 * 24 -> "${min / 60} hours ago"
-        else -> "${min / (60 * 24)} days ago"
-    }
-}
 
 /** Settings > "About and updates": the current version, a manual check, and the update dialog. */
 /** Clockdown's privacy policy (GitHub Pages, gh-pages branch); Google Play requires a link to it inside the app. */
@@ -57,28 +41,6 @@ const val PRIVACY_URL = "https://nerdsanimein-ux.github.io/clockdown/privacy.htm
 @Composable
 fun UpdatesGroup() {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var tick by remember { mutableIntStateOf(0) }
-    var checking by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
-    var dialogFor by remember { mutableStateOf<UpdateInfo?>(null) }
-    val update = remember(tick) { UpdateChecker.available(ctx) }
-
-    // revalidate = true when a cached update is about to be offered: ask GitHub first, so a release that has since
-    // been deleted is never offered (and its badge goes away).
-    fun check(revalidate: Boolean = false) {
-        checking = true; message = null
-        scope.launch {
-            val r = withContext(Dispatchers.IO) { UpdateChecker.check(ctx, if (revalidate) CheckMode.REVALIDATE else CheckMode.MANUAL) }
-            checking = false; tick++
-            when (r) {
-                CheckResult.UPDATE -> dialogFor = UpdateChecker.available(ctx)
-                CheckResult.CURRENT -> message = "You're on the latest version."
-                CheckResult.OFFLINE -> message = "Couldn't check right now. Please check your internet connection and try again."
-                CheckResult.LIMITED -> message = "Too many checks in a short time. Please try again in a little while."
-            }
-        }
-    }
 
     Group("About and updates") {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -96,15 +58,11 @@ fun UpdatesGroup() {
                 Text("What Clockdown keeps on your phone, and the little it sends", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        // The Play build: updates come from Google Play, so this opens Clockdown's Play page instead of checking GitHub.
-        if (!BuildConfig.SELF_UPDATE) Row(
+        // Updates come from Google Play now, for both builds: this opens Clockdown's Play page. (The GitHub build still
+        // quietly looks for a GitHub release and offers it on Home, but none are planned after 1.9.3.)
+        Row(
             Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
-                .clickable {
-                    val market = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=${ctx.packageName}"))
-                    runCatching { ctx.startActivity(market) }.onFailure {
-                        runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://play.google.com/store/apps/details?id=${ctx.packageName}"))) }
-                    }
-                }
+                .clickable { openPlay(ctx) }
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -113,34 +71,33 @@ fun UpdatesGroup() {
                 Text("Updates come through Google Play. Tap to open Clockdown there.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        else Row(
-            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
-                .clickable(enabled = !checking) { check(revalidate = update != null) }
-                .padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Check for updates", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    when {
-                        checking -> "Checking…"
-                        update != null -> "Version ${update.versionName} is ready to install"
-                        message != null -> message!!
-                        else -> "Last checked ${ago(UpdateChecker.lastChecked(ctx))}"
-                    },
-                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (update != null) {
-                Text(
-                    "New", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.primary).padding(horizontal = 12.dp, vertical = 5.dp),
-                )
-            }
-        }
     }
+}
 
-    dialogFor?.let { UpdateDialog(it) { dialogFor = null; tick++ } }
+/** Clockdown's page in the Play Store app, or on the web if there's no Play Store. */
+fun openPlay(ctx: android.content.Context) {
+    val market = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=${ctx.packageName}"))
+        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { ctx.startActivity(market) }.onFailure {
+        runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://play.google.com/store/apps/details?id=${ctx.packageName}")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+}
+
+/** GitHub build only (1.9.3, the last one): Home asks people to move to Google Play, where updates come from now. */
+@Composable
+fun MovedToPlayCard() {
+    val ctx = LocalContext.current
+    Column(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).background(MaterialTheme.colorScheme.primaryContainer).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("Clockdown is now on Google Play", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        Text(
+            "New updates come only through Google Play from now on. Open Clockdown there and tap Update. Your timetable, timers and sign-in stay just as they are.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+        TextButton(onClick = { openPlay(ctx) }) { Text("Open Google Play", color = MaterialTheme.colorScheme.onPrimaryContainer) }
+    }
 }
 
 private sealed interface Phase {

@@ -23,8 +23,9 @@ android {
         targetSdk = 36
         // Bump versionCode by 1 for EVERY release (a whole number; Android and the in-app updater compare it).
         // versionName is only the label people see, e.g. "1.1". The GitHub release tag must equal versionCode.
-        versionCode = 20
-        versionName = "2.0"
+        // 1.9.3 (18) is the last GitHub build; Google Play already has 2.0 (20), so the next Play release is 21.
+        versionCode = 18
+        versionName = "1.9.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Where crash reports go. Lives in local.properties (git-ignored); empty means crash reporting is simply off.
