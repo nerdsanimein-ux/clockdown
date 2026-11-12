@@ -9,17 +9,15 @@ Clockdown counts down to the things you don't want to miss, so you can stop chec
 - **Attendance.** Your attendance from Amizone in its own tab: each subject's percentage in Amizone's own green, yellow and red, how many classes to attend to get back above 75% (or how many you can miss), which of today's classes have been marked, a recovery plan from your real timetable, and a leave planner. It stays on your phone, and it's refreshed when you open the app, pull down on the tab or tap the widget, with a little extra around class times.
 - **Short alerts.** Class alerts play a two-second sound (five to choose from, all original: see [SOUNDS.md](SOUNDS.md)) and a quick buzz, then stop by themselves. Timers can optionally keep ringing until dismissed.
 - **Home screen widgets.** A live ticking timer, your next classes, or a list of what's coming up, in your choice of looks: solid cards, gradients, bold, see-through glass and mono that adapt to your wallpaper, and more. Set one look for all class timers, or give each widget its own. After saving a timer, one tap puts it on your home screen.
-- **Private by design.** No ads, no tracking. Everything stays on your phone. The only internet use is talking to Amizone and its LMS (if you connect it), checking this page for new versions, once a day an anonymous version count (a random number the app made up and the version you're on, so the developer knows how many have updated), and, if the app crashes, sending a short crash report (the error and your phone model). None of it ever includes your ID, password, name or timetable. You can switch the version count and crash reports off in Settings.
+- **Private by design.** No ads, no tracking. Everything stays on your phone. The only internet use is talking to Amizone and its LMS (if you connect it), once a day an anonymous version count (a random number the app made up and the version you're on, so the developer knows how many have updated), and, if the app crashes, sending a short crash report (the error and your phone model). None of it ever includes your ID, password, name or timetable. You can switch the version count and crash reports off in Settings.
 
 ## Install (Android 8 or newer)
 
-1. On your phone, download [Clockdown.apk](https://github.com/nerdsanimein-ux/clockdown/releases/latest/download/Clockdown.apk) — this link always gets the newest version.
-2. Open the downloaded file. If Android asks, allow your browser to "install unknown apps", then tap **Install**.
-3. Open **Clockdown** and allow notifications when asked, so alarms can reach you.
+Get Clockdown on Google Play: **[play.google.com/store/apps/details?id=com.rishabh.clockdown](https://play.google.com/store/apps/details?id=com.rishabh.clockdown)**. Open it and allow notifications when asked, so alarms can reach you.
 
-**Android shows a warning?** That's normal for any app that doesn't come from the Play Store; it's about where the app came from, not what it does. If you see "Blocked by Play Protect" or "Harmful app", tap **More details** (or the small arrow), then **Install anyway**. If Android offers to scan the app first, you can tap **Scan**. The same steps are in the app under **Settings > How to install**.
+**Updating:** updates come through the Play Store like any other app.
 
-**Updating:** after the first install, Clockdown checks for new versions by itself. When one is ready it shows a short "Clockdown X is available" box every time you open the app until you update (**Later** closes it for now), sends one notification per version within a couple of hours of a release, and puts a dot on the Settings button. You can always open **Settings → Check for updates** and tap **Update now**.
+**Installed Clockdown from this page before?** Open Clockdown on Google Play (or **Settings → Check for updates** in the app) and tap **Update**. It's the same app, so your timetable, timers and sign-in stay as they are. Versions from this page stopped getting updates after 1.9.3.
 
 **Staying signed in to Amizone:** Amizone's sign-in only lasts about 2½ hours unless it's used, so between 7 am and 11 pm Clockdown makes one tiny request roughly every 2 hours to keep it renewed. Overnight it does nothing; if Android delays it (battery savers) or the sign-in lapses, the one-tap reconnect still works.
 
@@ -27,12 +25,10 @@ Clockdown counts down to the things you don't want to miss, so you can stop chec
 
 Build: `./gradlew assembleDebug` (needs JDK 21 and the Android SDK). Run the tests with `./gradlew testDebugUnitTest`.
 
-Releasing:
+Releasing (Google Play only; GitHub releases ended with 1.9.3, release `18`, which stays Latest so the old download link keeps sending people to Play):
 
-1. In `app/build.gradle.kts`, raise `versionCode` by 1 and set `versionName` (for example `1.1`).
-2. Put your signing details in `local.properties` (`release.storeFile`, `release.storePassword`, `release.keyAlias`, `release.keyPassword`). That file is git-ignored. Then run `./gradlew assembleRelease`.
-3. Create a GitHub release whose **tag is exactly the new `versionCode`** (for example `2`), whose title is the version name, and whose description lists what's new in plain words. Attach `app/build/outputs/apk/release/app-release.apk` **twice**: once under the exact name `Clockdown.apk` (the permanent link students use always points here) and once under a versioned name like `Clockdown-1.2.apk` (the in-app updater just takes the first `.apk` it finds in the release, so this is what it actually fetches). Publish it as a normal release, not a draft or prerelease, so GitHub marks it **Latest** automatically.
+1. In `app/build.gradle.kts`, raise `versionCode` above the last Play release (2.0 was 20, so next is 21) and set `versionName`.
+2. Put your signing details in `local.properties` (`release.storeFile`, `release.storePassword`, `release.keyAlias`, `release.keyPassword`). That file is git-ignored. Then run `./gradlew bundlePlay`, which builds `app/build/outputs/bundle/play/app-play.aab`: the app without the GitHub self-updater and its install permissions (`app/src/play/AndroidManifest.xml`).
+3. In Play Console, create a new Production release, upload the `.aab`, write what's new in plain words, and send it for review. Don't change anything in Play Console while it's in review.
 
-Keep your signing key safe and backed up. Android only installs an update if it is signed with the same key as the version already on the phone. See `CLAUDE.md` for the full rule on why both asset names matter.
-
-Google Play: `./gradlew bundlePlay` builds `app/build/outputs/bundle/play/app-play.aab`, the same app and signing key without the GitHub self-updater and its install permissions (`app/src/play/AndroidManifest.xml`; updates come from Play). GitHub and Play share one `versionCode` sequence, so a Play release always gets a higher code than the newest GitHub release, and the other way round.
+Keep your signing key safe and backed up. Play signs with this same key (Play App Signing, uploaded with PEPK), and Android only installs an update signed with the same key as the version already on the phone. See `CLAUDE.md` for the checks to run before every release.

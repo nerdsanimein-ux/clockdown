@@ -1,43 +1,38 @@
 # CLAUDE.md
 
-## Releasing
+## Releasing: Google Play only
 
-Students share one permanent link that always resolves to the newest build:
+Clockdown is on Google Play (`com.rishabh.clockdown`, Play Console organisation account Elocent). Since 1.9.3
+(code 18, GitHub release `18`) every new version goes out **only through Google Play**:
 
-    https://github.com/nerdsanimein-ux/clockdown/releases/latest/download/Clockdown.apk
+1. Raise `versionCode` in `app/build.gradle.kts` above the last Play release (2.0 was 20, so the next is 21). The
+   `versionName` is the user's call: ask, never pick one unasked.
+2. Build with `./gradlew bundlePlay` and upload `app/build/outputs/bundle/play/app-play.aab` to the Production track
+   in Play Console (see `README.md`'s Releasing section).
+3. Once a release is in review, don't edit anything in Play Console: any change sends it back to the start of the
+   queue.
 
-That URL only works if the **latest** GitHub release has an asset named **exactly** `Clockdown.apk`. Every release from
-now on must:
-
-1. Attach the signed APK under the exact name `Clockdown.apk`.
-2. Also attach it under its versioned name (e.g. `Clockdown-1.3.apk`) — the in-app updater
-   (`UpdateEngine`/`parseRelease` in `Update.kt`) just picks the first asset in the release whose name ends in
-   `.apk`, so the versioned file being present and uploaded is enough; it does not care about `Clockdown.apk`
-   specifically. Keep both so the permanent link and the updater both keep working.
-3. Be published as a normal (non-draft, non-prerelease) release, which GitHub then marks **Latest** automatically —
-   don't mark an older tag Latest by hand, and don't leave the newest release as a draft or prerelease.
-4. Have a **tag that exactly equals the new `versionCode`** (see `README.md`'s Releasing section for the full
-   step-by-step).
-
-Never remove or rename an existing release's `.apk` asset after the fact — people on older versions still fetch it
+GitHub releases are finished. Don't publish new ones: release `18` (1.9.3) stays **Latest**, so the old permanent link
+`https://github.com/nerdsanimein-ux/clockdown/releases/latest/download/Clockdown.apk` keeps serving 1.9.3, which sends
+people to Play. Never remove or rename an existing release's `.apk` asset — people on older versions still fetch it
 by URL from the update they're on.
 
 ## Before every release: signing-key and update-path checks
 
 Android refuses to install an update whose signing certificate doesn't match the certificate already on the
-device (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, shown to the user as "Update didn't finish, this update can't be
-installed over the version you have"). Since students only ever update in place via the permanent link, a key
-change silently locks out everyone already on the app. Before publishing any new release:
+device (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). Play App Signing uses Clockdown's own key (uploaded with PEPK), so
+Play, GitHub and every phone share one certificate, SHA-256
+`eee3a7c748df1b89d240bab155650a2bdd6a3b070a5b44712114dbff56d8856b`. A key change silently locks out everyone already
+on the app. Before publishing any new release:
 
-1. **Compare signing certificates.** Build the new release APK, then run
-   `apksigner verify --print-certs <new.apk>` and the same against the currently-published `Clockdown.apk` (or its
-   versioned asset) from the latest GitHub release. The certificate SHA-256 digest must match exactly. If it
-   doesn't, stop — do not publish. Figure out why the signing config picked up a different keystore/alias before
-   doing anything else.
-2. **Test the in-app update from the previous version.** Install the *currently published* release on an
-   emulator (or device), then use the app's own updater (`Settings → Check for updates`) to update to the new
-   build. Confirm the update actually completes and the app opens afterward — don't just trust that the build
-   succeeded.
+1. **Check the signing certificate.** Run `keytool -printcert -jarfile app/build/outputs/bundle/play/app-play.aab`
+   (or `apksigner verify --print-certs` on an APK from `./gradlew assemblePlay`). The SHA-256 must be the digest
+   above. If it isn't, stop — do not upload. Figure out why the signing config picked up a different keystore/alias
+   before doing anything else.
+2. **Test the update from the current version.** On the `play35` emulator (it has the Play Store), install the
+   version currently on Play, then install the new build over it (`adb install -r` with the APK from
+   `./gradlew assemblePlay`). Confirm it installs, the app opens, and nothing is lost (no welcome screens) — don't
+   just trust that the build succeeded.
 
 Never release if either check fails. Never work around a signature mismatch by asking a student to uninstall and
 reinstall — that should be a last-resort fix for a one-off broken device, not the default plan for a release.
