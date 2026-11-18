@@ -27,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import com.rishabh.clockdown.ui.theme.ThemeMode
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -206,6 +207,15 @@ fun SettingsScreen(
                 else Button(onClick = { ctx.startActivity(Battery.requestIntent(ctx)) }) { Text("Allow") }
             }
 
+            Group("Appearance") {
+                Text("Theme", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(ThemeMode.SYSTEM to "Follow phone", ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark").forEach { (v, label) ->
+                        FilterChip(ThemeMode.current == v, { ThemeMode.set(ctx, v) }, label = { Text(label) })
+                    }
+                }
+            }
+
             Group("Widgets") {
                 Text(
                     "Put live countdowns on your home screen. You can add several timer widgets, each showing a different timer, " +
@@ -264,7 +274,8 @@ fun SettingsScreen(
                 var motion by remember { mutableStateOf(ctx.motionStop) }
                 DisposableEffect(Unit) { onDispose { Alarms.stopPreview() } }
                 Text(
-                    "Class and timer alerts play a short sound for two seconds with a quick buzz, then stop by themselves.",
+                    "Class and timer alerts play a short sound for two seconds with a quick buzz, then stop by themselves. " +
+                        "They follow your phone's ringer: on vibrate they only buzz, on silent they only show the notification.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 AlertSound.entries.forEach { s ->

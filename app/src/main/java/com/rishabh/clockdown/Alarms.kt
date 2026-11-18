@@ -13,6 +13,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.Handler
@@ -75,6 +76,14 @@ object Alarms {
     /** A short buzz-buzz, once. */
     fun buzz(ctx: Context) = vibrator(ctx).vibrate(VibrationEffect.createWaveform(longArrayOf(0, 250, 120, 250), -1), attrs)
 
+    /**
+     * Android plays alarm-type sound even on silent, which is wrong for a class reminder that goes off IN class. So the
+     * phone's ringer decides: normal = sound + buzz, vibrate = buzz only, silent = just the notification.
+     */
+    fun soundAllowed(ctx: Context) = ringer(ctx) == AudioManager.RINGER_MODE_NORMAL
+    fun buzzAllowed(ctx: Context) = ringer(ctx) != AudioManager.RINGER_MODE_SILENT
+    private fun ringer(ctx: Context) = runCatching { ctx.getSystemService(AudioManager::class.java).ringerMode }.getOrDefault(AudioManager.RINGER_MODE_NORMAL)
+
     private fun openApp(ctx: Context) = Scheduler.openApp(ctx)
 
     /**
@@ -99,8 +108,8 @@ object Alarms {
                 .addAction(Notification.Action.Builder(null, "Snooze 5 min", Scheduler.broadcast(ctx, SNOOZE, id, name, room)).build())
                 .setTimeoutAfter(10 * 60_000L)
                 .build())
-            runCatching { buzz(ctx) }
-            runCatching {
+            if (buzzAllowed(ctx)) runCatching { buzz(ctx) }
+            if (soundAllowed(ctx)) runCatching {
                 val p = player(ctx, ctx.alertSound, loop = false)
                 val done = java.util.concurrent.CountDownLatch(1)
                 p.setOnCompletionListener { done.countDown() }
@@ -169,8 +178,10 @@ class RingService : Service() {
         if (Build.VERSION.SDK_INT >= 29) startForeground(id.coerceAtLeast(1), n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK) else startForeground(id.coerceAtLeast(1), n)
 
         player?.release()
-        player = runCatching { Alarms.player(this, alertSound, loop = true).also { it.start() } }.getOrNull()
-        if (motionStop) {
+        if (Alarms.soundAllowed(this)) player = runCatching { Alarms.player(this, alertSound, loop = true).also { it.start() } }.getOrNull()
+        if (!Alarms.buzzAllowed(this)) {
+            // Silent: no sound and no buzz; the notification and the full-screen alarm still show.
+        } else if (motionStop) {
             motion = MotionStop(getSystemService(SensorManager::class.java)) { stopSelf() }.also { it.start() }
         } else {
             // No sensors in this mode, so the buzz is safe to repeat: every few seconds until dismissed.

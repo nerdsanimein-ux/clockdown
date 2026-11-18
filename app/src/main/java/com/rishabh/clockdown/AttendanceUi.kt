@@ -366,13 +366,14 @@ private fun SubjectScreen(c: CourseAtt, snap: AttSnapshot, events: List<Event>, 
                             if (r.slots.isNotEmpty()) Text(r.slots.joinToString(" · ") { it.replace("-", "–") }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         val n = maxOf(r.present, r.absent)
-                        val (label, color) = when (r.mark) {
+                        // A double period with one present and one absent: say so, instead of just "Present".
+                        val (label, color) = if (r.present > 0 && r.absent > 0) "${r.present} present · ${r.absent} absent" to RED else when (r.mark) {
                             Mark.PRESENT -> "Present" to GREEN
                             Mark.OD -> "OD" to GREEN
                             Mark.ABSENT -> "Absent" to RED
                             null -> "–" to MaterialTheme.colorScheme.onSurfaceVariant
                         }
-                        Text(label + if (n > 1) " ×$n" else "", style = MaterialTheme.typography.labelLarge, color = color)
+                        Text(label + if (n > 1 && !(r.present > 0 && r.absent > 0)) " ×$n" else "", style = MaterialTheme.typography.labelLarge, color = color)
                     }
                 }
             }

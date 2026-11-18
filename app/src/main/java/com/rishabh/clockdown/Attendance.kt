@@ -59,12 +59,23 @@ data class AttSnapshot(val courses: List<CourseAtt>, val updatedAt: Long) {
 
     fun course(code: String?) = courses.firstOrNull { it.code.equals(code, ignoreCase = true) }
 
-    /** null = nothing to say (course not in the list, or not tracked). Today's class with no row yet is [ClassMark.NOT_MARKED]. */
+    /**
+     * null = nothing to say (course not in the list, or not tracked). Today's class with no row yet is [ClassMark.NOT_MARKED].
+     * Amizone's per-class timetable mark ([Event.amizoneMark]) wins: a history row covers back-to-back periods together
+     * (present 1, absent 1 for a double period), so on its own it can't say WHICH period was missed.
+     */
     fun markFor(e: Event): ClassMark? {
         val c = course(e.courseCode)?.takeIf { it.tracked } ?: return null
         val at = java.time.Instant.ofEpochMilli(e.startMillis).atZone(AMIZONE_ZONE)
         val hhmm = at.toLocalTime().format(HHMM)
-        val r = c.records.firstOrNull { it.date == at.toLocalDate() && it.slots.any { s -> s.startsWith(hhmm) } } ?: return ClassMark.NOT_MARKED
+        val r = c.records.firstOrNull { it.date == at.toLocalDate() && it.slots.any { s -> s.startsWith(hhmm) } }
+        when (e.amizoneMark) {
+            "A" -> return ClassMark.ABSENT
+            "P" -> return if (r?.od == true) ClassMark.OD else ClassMark.PRESENT
+        }
+        if (r == null) return ClassMark.NOT_MARKED
+        // A grouped row with both present and absent periods, and no per-class mark yet: don't guess.
+        if (r.present > 0 && r.absent > 0 && r.slots.size > 1) return ClassMark.NOT_MARKED
         return when (r.mark) { Mark.PRESENT -> ClassMark.PRESENT; Mark.OD -> ClassMark.OD; Mark.ABSENT -> ClassMark.ABSENT; null -> ClassMark.NOT_MARKED }
     }
 }
@@ -225,7 +236,9 @@ object AttendanceChanges {
     /** Rows that are new or changed, dated today or yesterday (a long-offline phone doesn't spray a week of old news). */
     fun marks(old: AttSnapshot, new: AttSnapshot, today: LocalDate): List<MarkNote> = new.courses.filter { it.tracked }.flatMap { c ->
         val before = old.course(c.code)?.records?.associate { it.key to it.mark }.orEmpty()
-        c.records.filter { it.mark != null && !it.date.isBefore(today.minusDays(1)) && before[it.key] != it.mark }.map { MarkNote(c, it.mark!!) }
+        c.records.filter { it.mark != null && !it.date.isBefore(today.minusDays(1)) && before[it.key] != it.mark }
+            // A double period with any absence is news about the absence, not "Marked present".
+            .map { MarkNote(c, if (it.absent > 0) Mark.ABSENT else it.mark!!) }
     }
 
     /** Only drops: a subject that moved to a worse zone. */
@@ -296,6 +309,9 @@ object AttendanceSync {
             }
             val snap = AttSnapshot(courses, System.currentTimeMillis())
             AttendanceStore.save(ctx, snap)
+            // Something was just marked: fetch today's per-class marks too, so a double period shows which half was missed.
+            if (old != null && courses.any { c -> old.course(c.code).let { it == null || it.attended != c.attended || it.total != c.total } })
+                AmizoneSync.refreshTodayMarks(ctx, cookies, ua)
             p.edit().remove("attFailure").apply()
             if (old != null) notify(ctx, old, snap)
             Scheduler.refreshWidget(ctx)

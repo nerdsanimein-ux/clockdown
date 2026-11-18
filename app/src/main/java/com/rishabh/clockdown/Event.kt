@@ -38,6 +38,8 @@ data class Event(
     val progressStyle: Int? = null,
     /** A [WidgetStyle] id, or null to follow the default (see resolveStyle). */
     val widgetStyle: String? = null,
+    /** Amizone's own mark for THIS class from its timetable (AttndColor): "P" present, "A" absent, null not marked / unknown. */
+    val amizoneMark: String? = null,
 )
 
 @Dao
@@ -92,6 +94,9 @@ abstract class EventDao {
         return gone
     }
 
+    @Query("UPDATE events SET amizoneMark = :mark WHERE amizoneId = :amizoneId")
+    abstract fun setAmizoneMark(amizoneId: Long, mark: String?)
+
     /** Disconnect: drops every class event, returning their ids. */
     @Transaction
     open fun deleteAmizone(): List<Int> {
@@ -127,7 +132,13 @@ private val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
-@Database(entities = [Event::class], version = 4, exportSchema = true)
+private val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE events ADD COLUMN amizoneMark TEXT")
+    }
+}
+
+@Database(entities = [Event::class], version = 5, exportSchema = true)
 abstract class AppDb : RoomDatabase() {
     abstract fun events(): EventDao
 
@@ -136,7 +147,7 @@ abstract class AppDb : RoomDatabase() {
 
         fun get(ctx: Context): EventDao = (db ?: synchronized(this) {
             db ?: Room.databaseBuilder(ctx.applicationContext, AppDb::class.java, "clockdown.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build().also { db = it }
         }).events()
     }

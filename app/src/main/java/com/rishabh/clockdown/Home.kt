@@ -99,9 +99,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import com.rishabh.clockdown.ui.theme.ThemeMode
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.Dispatchers
@@ -159,7 +162,7 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
     var syncing by remember { mutableStateOf(false) }
     var editor by remember { mutableStateOf<Event?>(null) } // kept after closing so the exit animation still has content
     var editorOpen by remember { mutableStateOf(false) }
-    var settingsOpen by remember { mutableStateOf(false) }
+    var settingsOpen by rememberSaveable { mutableStateOf(false) } // saveable: changing the theme recreates the screen
     var holidaysOpen by remember { mutableStateOf(false) }
     var pinEvent by remember { mutableStateOf<Event?>(null) } // a timer that was just saved: offer to put it on the home screen
     var addWidgetOpen by remember { mutableStateOf(false) }
@@ -585,6 +588,13 @@ private fun Header(connected: Boolean, syncing: Boolean, updateReady: Boolean, o
                 style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        // Night mode in one tap: flips between light and dark (Settings also has "Follow phone").
+        val ctx = LocalContext.current
+        val dark = ThemeMode.isDark()
+        FilledTonalIconButton(onClick = { ThemeMode.set(ctx, if (dark) ThemeMode.LIGHT else ThemeMode.DARK) }, modifier = Modifier.size(48.dp)) {
+            Text(if (dark) "☀️" else "🌙", fontSize = 20.sp, modifier = Modifier.semantics { contentDescription = if (dark) "Switch to light mode" else "Switch to dark mode" })
+        }
+        Spacer(Modifier.width(8.dp))
         if (connected) {
             FilledTonalIconButton(onClick = onSync, enabled = !syncing, modifier = Modifier.size(48.dp)) {
                 if (syncing) LoadingIndicator(Modifier.size(28.dp)) else Icon(Icons.Filled.Refresh, contentDescription = "Sync now")

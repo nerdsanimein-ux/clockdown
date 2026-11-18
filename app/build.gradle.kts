@@ -24,8 +24,8 @@ android {
         // Bump versionCode by 1 for EVERY release (a whole number; Android and the in-app updater compare it).
         // versionName is only the label people see, e.g. "1.1". The GitHub release tag must equal versionCode.
         // 1.9.3 (18) is the last GitHub build; Google Play already has 2.0 (20), so the next Play release is 21.
-        versionCode = 18
-        versionName = "1.9.3"
+        versionCode = 21
+        versionName = "2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Where crash reports go. Lives in local.properties (git-ignored); empty means crash reporting is simply off.
@@ -62,6 +62,10 @@ android {
             initWith(getByName("release"))
             matchingFallbacks += "release"
             buildConfigField("boolean", "SELF_UPDATE", "false")
+            // R8 (Play Console asks for it): removes unused code and resources and optimises the rest. Names are NOT
+            // obfuscated (see proguard-rules.pro), so crash reports in Sentry stay readable without a mapping upload.
+            isMinifyEnabled = true
+            isShrinkResources = true
         }
     }
     compileOptions {

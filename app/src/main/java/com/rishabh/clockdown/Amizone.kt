@@ -115,8 +115,19 @@ fun parseClasses(arr: JSONArray): List<Event> = (0 until arr.length()).map { arr
         faculty = o.str("FacultyName")?.let { Regex("<b>(.*?)</b>").find(it)?.groupValues?.get(1) }
             ?.replace(Regex("\\s*\\(\\d+\\)\\s*$"), "")?.trim()?.ifBlank { null },
         room = o.str("RoomNo"),
+        amizoneMark = markOf(o.str("AttndColor")),
     )
 }.sortedBy { it.startMillis }
+
+/**
+ * The coloured dot Amizone's own timetable shows per class: green "#4FCC4F" present, red "#F00" absent; anything else
+ * (blue "#3A87AD" = not marked yet, empty = not tracked) is null. Per class, so a double period with one absence is right.
+ */
+fun markOf(color: String?): String? = when (color?.trim()?.uppercase()) {
+    "#4FCC4F" -> "P"
+    "#F00", "#FF0000", "RED" -> "A"
+    else -> null
+}
 
 /** What one request to the timetable endpoint returned. Cookies and headers are deliberately not kept. */
 internal class Reply(val code: Int, val contentType: String?, val body: String, val setCookies: List<String> = emptyList()) {
@@ -191,6 +202,20 @@ object AmizoneSync {
         val ua = Session.userAgent(ctx) ?: WebSettings.getDefaultUserAgent(ctx)
         val r = try { fetchDay(LocalDate.now(IST), cookies, ua) } catch (e: IOException) { return }
         if (SessionCheck.classify(r.code, r.contentType, r.body) == Verdict.OK) Session.renew(ctx, r.setCookies)
+    }
+
+    /**
+     * Today's per-class present/absent marks, after the attendance counts changed (a class was just marked). ONE request;
+     * only [Event.amizoneMark] is written, nothing else, and any failure simply leaves the old marks.
+     */
+    @Synchronized
+    fun refreshTodayMarks(ctx: Context, cookies: String, ua: String) {
+        val r = try { fetchDay(LocalDate.now(IST), cookies, ua) } catch (e: IOException) { return }
+        if (SessionCheck.classify(r.code, r.contentType, r.body) != Verdict.OK) return
+        Session.renew(ctx, r.setCookies)
+        val today = try { parseClasses(JSONArray(SessionCheck.trimBody(r.body))) } catch (e: Exception) { return }
+        val dao = AppDb.get(ctx)
+        today.forEach { e -> e.amizoneId?.let { dao.setAmizoneMark(it, e.amizoneMark) } }
     }
 
     private fun fetchDay(day: LocalDate, cookies: String, ua: String): Reply =

@@ -1,6 +1,6 @@
 package com.rishabh.clockdown.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
+
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
@@ -43,7 +43,7 @@ private val ExpressiveShapes = Shapes(
 )
 
 @Composable
-fun ClockdownTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+fun ClockdownTheme(darkTheme: Boolean = ThemeMode.isDark(), content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = if (darkTheme) Dark else Light,
         typography = Typography,

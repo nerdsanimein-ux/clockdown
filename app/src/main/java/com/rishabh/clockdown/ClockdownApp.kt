@@ -7,6 +7,7 @@ class ClockdownApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Defaults.init(this)
+        com.rishabh.clockdown.ui.theme.ThemeMode.init(this)
         CrashReporting.apply(this)
     }
 }

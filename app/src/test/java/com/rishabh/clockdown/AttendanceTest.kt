@@ -164,6 +164,21 @@ class AttendanceTest {
         assertNull(snap.markFor(event("ZZ999", today, 9, 30)))
     }
 
+    @Test fun aDoublePeriodWithOneAbsenceFollowsAmizonesPerClassMark() {
+        // Amizone's history has ONE row for 09:30 + 10:26 with present 1, absent 1; its timetable dot says which was missed.
+        val mixed = AttSnapshot(listOf(CourseAtt("AB101", "A", "1", "2", true, 1, 2, listOf(
+            ClassRecord(today, listOf("09:30-10:25", "10:26-11:20"), 1, 1, false)))), 0)
+        assertEquals(ClassMark.ABSENT, mixed.markFor(event("AB101", today, 9, 30).copy(amizoneMark = markOf("#F00"))))
+        assertEquals(ClassMark.PRESENT, mixed.markFor(event("AB101", today, 10, 26).copy(amizoneMark = markOf("#4fcc4f"))))
+        // Without the timetable's mark it can't tell which period was missed, so it doesn't claim "Present" for both.
+        assertEquals(ClassMark.NOT_MARKED, mixed.markFor(event("AB101", today, 9, 30)))
+        // Not marked yet (blue) or not tracked (empty) colours are no mark at all.
+        assertNull(markOf("#3A87AD")); assertNull(markOf("")); assertNull(markOf(null))
+        // The "marked" notification for that row is about the absence.
+        val before = mixed.copy(courses = mixed.courses.map { it.copy(records = emptyList()) })
+        assertEquals(Mark.ABSENT, AttendanceChanges.marks(before, mixed, today).single().mark)
+    }
+
     // ---- notifications
 
     @Test fun markChangesAreOnlyNewOrChangedRecentRows() {
