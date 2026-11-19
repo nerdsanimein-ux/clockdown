@@ -45,7 +45,33 @@ class UpdateTest {
     }
 
     @Test
-    fun keepAliveRunsOnlyBetweenSevenAndEleven() {
+    fun keepAliveAlarmIsSetAgainOnlyWhenNoneIsDue() {
+        val now = 1_000_000_000L
+        assertEquals(true, keepAliveMissing(0L, now))                   // never set
+        assertEquals(false, keepAliveMissing(now + 30 * 60_000L, now))  // on its way: opening the app must not push it back
+        assertEquals(false, keepAliveMissing(now - 5 * 60_000L, now))   // just due, may be firing right now
+        assertEquals(true, keepAliveMissing(now - 11 * 60_000L, now))   // long past: lost to a force stop
+    }
+
+    @Test
+    fun anHourlyKeepAliveRenewsWellInsideAmizonesSignInTime() {
+        // Renewal only happens once half of the ~150 minutes has passed, so the worst case is one interval past 75 minutes.
+        assertEquals(true, 75 + KeepAlive.EVERY_MS / 60_000L < 150)
+    }
+
+    @Test
+    fun sessionGapIsReportedInBandsOnly() {
+        val h = 3_600_000L
+        assertEquals("unknown", sinceOkBand(0L, 5 * h))
+        assertEquals("under 1.5h", sinceOkBand(h, 2 * h))
+        assertEquals("1.5-2.5h", sinceOkBand(h, 3 * h))
+        assertEquals("4-8h", sinceOkBand(h, 8 * h))
+        assertEquals("8-24h", sinceOkBand(h, 10 * h))
+        assertEquals("over 24h", sinceOkBand(h, 30 * h))
+    }
+
+    @Test
+    fun updateCheckRunsOnlyBetweenSevenAndEleven() {
         fun at(h: Int, m: Int = 0) = keepAliveWindow(java.time.LocalTime.of(h, m))
         assertEquals(false, at(6, 59)); assertEquals(true, at(7)); assertEquals(true, at(22, 59)); assertEquals(false, at(23)); assertEquals(false, at(3))
     }

@@ -55,6 +55,7 @@ object Session {
      * Only called with the replies of requests that SUCCEEDED, so a reply to a dead session can never replace a good cookie.
      */
     fun renew(ctx: Context, setCookies: List<String>) {
+        ctx.prefs.edit().putLong("sessionOkAt", System.currentTimeMillis()).apply() // Amizone just accepted the sign-in (see AmizoneSync.expired)
         if (setCookies.isEmpty()) return
         val old = cookies(ctx) ?: return
         val merged = CookieMerge.merge(old, setCookies, System.currentTimeMillis())
@@ -63,7 +64,7 @@ object Session {
 
     fun save(ctx: Context, cookies: String, userAgent: String) {
         sp(ctx)?.edit()?.putString("cookies", cookies)?.putString("ua", userAgent)?.apply()
-        ctx.prefs.edit().putBoolean("sessionExpired", false).apply()
+        ctx.prefs.edit().putBoolean("sessionExpired", false).putLong("sessionOkAt", System.currentTimeMillis()).apply()
     }
 
     fun clear(ctx: Context) {

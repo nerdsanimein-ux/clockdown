@@ -52,7 +52,15 @@ object CredentialStore {
     /** Saving fresh details (a successful sign-in) also lifts any earlier "rejected" mark. */
     fun save(ctx: Context, id: String, password: String) {
         if (id.isBlank() || password.isEmpty()) return
-        sp(ctx)?.edit()?.putString("id", id)?.putString("pw", password)?.putBoolean("rejected", false)?.apply()
+        sp(ctx)?.edit()?.putString("id", id)?.putString("pw", password)?.putBoolean("rejected", false)?.putInt("autoRefusals", 0)?.apply()
+    }
+
+    /** Amizone sent an automatic sign-in back. Returns how many times in a row that has now happened. */
+    fun noteAutoRefused(ctx: Context): Int {
+        val p = sp(ctx) ?: return AutoLogin.MAX_TRIES
+        val n = p.getInt("autoRefusals", 0) + 1
+        p.edit().putInt("autoRefusals", n).apply()
+        return n
     }
 
     /** A saved login that Amizone refused: keep it visible in Settings but never auto-submit it again. */
@@ -101,8 +109,18 @@ class AutoLogin(private val hasDetails: Boolean, private val rejected: Boolean, 
 
     fun markSubmitted() { submitted = true }
 
-    /** Called when the login page shows up again after we submitted: Amizone said no. Never retried. */
+    /** Called when the login page shows up again after we submitted: Amizone said no. */
     fun failedAfterSubmit() = submitted
+
+    companion object {
+        /**
+         * Automatic tries in a row before the saved login is set aside. Amizone sometimes sends a correct login back with
+         * no message (its captcha check, most likely), so one refusal gets one more try on a fresh page. A password that
+         * really changed is refused twice and then never filled in again until the person types the new one.
+         */
+        const val MAX_TRIES = 2
+        fun tryAgain(refusalsInARow: Int) = refusalsInARow < MAX_TRIES
+    }
 }
 
 /** The scripts run inside the login page. Pure strings, so their exact text can be tested. */

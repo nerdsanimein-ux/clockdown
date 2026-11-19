@@ -23,6 +23,8 @@
                 <action android:name="com.rishabh.clockdown.DEBUG_UPDATE_RUN" />
                 <action android:name="com.rishabh.clockdown.DEBUG_INSTALL" />
                 <action android:name="com.rishabh.clockdown.DEBUG_KEEPALIVE" />
+                <action android:name="com.rishabh.clockdown.DEBUG_KEEPALIVE_SOON" />
+                <action android:name="com.rishabh.clockdown.DEBUG_KEEPALIVE_LAST" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_TLS" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_SSO" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_SYNC" />
@@ -36,7 +38,7 @@
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_OPEN" />
                 <action android:name="com.rishabh.clockdown.DEBUG_DEMO" />
                 <action android:name="com.rishabh.clockdown.DEBUG_LMS_BOARD" />
-                <action android:name="com.rishabh.clockdown.DEBUG_LMS_REMIND" />
+                <action android:name="com.rishabh.clockdown.DEBUG_LMS_REMIND" />
                 <action android:name="com.rishabh.clockdown.DEBUG_STATS_PING" />
                 <action android:name="com.rishabh.clockdown.DEBUG_PDF_INFO" />
             </intent-filter>

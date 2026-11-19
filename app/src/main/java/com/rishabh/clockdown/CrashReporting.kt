@@ -28,9 +28,13 @@ object CrashReporting {
 
     /** Starts or stops reporting to match the setting. Safe to call any time; does nothing when no DSN was built in. */
     fun apply(ctx: Context) {
-        if (BuildConfig.SENTRY_DSN.isBlank()) return
+        if (BuildConfig.SENTRY_DSN.isBlank() || isTestLab(ctx)) return
         if (enabled(ctx)) start(ctx.applicationContext) else if (Sentry.isEnabled()) Sentry.close()
     }
+
+    /** Google Play tests every uploaded build on its own robot phones (Firebase Test Lab); their reports aren't students'. */
+    private fun isTestLab(ctx: Context) =
+        runCatching { android.provider.Settings.System.getString(ctx.contentResolver, "firebase.test.lab") == "true" }.getOrDefault(false)
 
     private fun start(app: Context) {
         if (Sentry.isEnabled()) return
@@ -123,6 +127,24 @@ object CrashReporting {
         Sentry.captureEvent(event)
     }
 
+    /**
+     * The Amizone sign-in lapsed. Only how long it had been since Amizone last accepted it (in bands), and the phone's
+     * own settings that decide whether the keep-alive can run: battery optimisation, exact alarms, Android's standby
+     * bucket. A long gap means the phone stopped the keep-alive; a short one means Amizone ended the sign-in itself.
+     */
+    fun noteSessionExpired(ctx: Context, lastOkAt: Long) {
+        if (!Sentry.isEnabled()) return
+        val event = SentryEvent().apply {
+            level = SentryLevel.WARNING
+            message = Message().apply { formatted = "Amizone sign-in lapsed"; message = formatted }
+        }
+        event.setTag("session.sinceOk", sinceOkBand(lastOkAt, System.currentTimeMillis()))
+        event.setTag("session.batteryExempt", Battery.exempt(ctx).toString())
+        event.setTag("session.exactAlarms", (android.os.Build.VERSION.SDK_INT < 31 || ctx.getSystemService(android.app.AlarmManager::class.java).canScheduleExactAlarms()).toString())
+        if (android.os.Build.VERSION.SDK_INT >= 28) event.setTag("session.standbyBucket", ctx.getSystemService(android.app.usage.UsageStatsManager::class.java).appStandbyBucket.toString())
+        Sentry.captureEvent(event)
+    }
+
     /** The LMS couldn't be read or signed in to. Only the failure TYPE goes out ("course-format", "sso-network"...), never any course, name or page content. */
     fun noteLmsFailure(kind: String) {
         if (!Sentry.isEnabled()) return
@@ -156,5 +178,19 @@ object CrashReporting {
         t = t.replace(Regex("[A-Za-z0-9+/_=.-]{24,}"), "[removed]")
         t = t.replace(Regex("\\d{5,}"), "#")
         return t
+    }
+}
+
+/** How long since Amizone last accepted the sign-in, in coarse bands (never an exact time). 0 = not known. */
+fun sinceOkBand(lastOkAt: Long, now: Long): String {
+    if (lastOkAt <= 0L || now < lastOkAt) return "unknown"
+    val min = (now - lastOkAt) / 60_000L
+    return when {
+        min < 90 -> "under 1.5h"
+        min < 150 -> "1.5-2.5h"
+        min < 240 -> "2.5-4h"
+        min < 480 -> "4-8h"
+        min < 1440 -> "8-24h"
+        else -> "over 24h"
     }
 }

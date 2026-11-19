@@ -196,12 +196,24 @@ object AmizoneSync {
      * It never touches the timetable, never notifies, and a failure or a dead sign-in is left for the normal sync to deal with.
      */
     @Synchronized
-    fun keepAlive(ctx: Context) {
-        if (ctx.sessionExpired) return
-        val cookies = Session.cookies(ctx) ?: return
+    fun keepAlive(ctx: Context): String {
+        val outcome = keepAliveOnce(ctx)
+        // For the debug view and testing: when the last keep-alive ran and what happened. Never any cookie or page content.
+        ctx.prefs.edit().putString("keepAliveLast", "${java.time.LocalDateTime.now(IST).withNano(0)} $outcome").apply()
+        return outcome
+    }
+
+    private fun keepAliveOnce(ctx: Context): String {
+        if (ctx.sessionExpired) return "skipped (signed out)"
+        val cookies = Session.cookies(ctx) ?: return "skipped (no session)"
         val ua = Session.userAgent(ctx) ?: WebSettings.getDefaultUserAgent(ctx)
-        val r = try { fetchDay(LocalDate.now(IST), cookies, ua) } catch (e: IOException) { return }
-        if (SessionCheck.classify(r.code, r.contentType, r.body) == Verdict.OK) Session.renew(ctx, r.setCookies)
+        // A sleeping phone only gets the network for a few seconds after a keep-alive alarm: give up before that ends.
+        val r = try { fetchDay(LocalDate.now(IST), cookies, ua, quickClient) } catch (e: IOException) { return "no connection (${e.javaClass.simpleName})" }
+        return when (SessionCheck.classify(r.code, r.contentType, r.body)) {
+            Verdict.OK -> { Session.renew(ctx, r.setCookies); "ok" }
+            Verdict.EXPIRED -> "expired"
+            Verdict.PROBLEM -> "HTTP ${r.code}"
+        }
     }
 
     /**
@@ -218,11 +230,13 @@ object AmizoneSync {
         today.forEach { e -> e.amizoneId?.let { dao.setAmizoneMark(it, e.amizoneMark) } }
     }
 
-    private fun fetchDay(day: LocalDate, cookies: String, ua: String): Reply =
-        fetch("/Calendar/home/GetDiaryEvents", mapOf("start" to day.toString(), "end" to day.plusDays(1).toString()), cookies, ua, xhr = true, json = true)
+    private val quickClient = client.newBuilder().callTimeout(8, TimeUnit.SECONDS).build()
+
+    private fun fetchDay(day: LocalDate, cookies: String, ua: String, http: OkHttpClient = client): Reply =
+        fetch("/Calendar/home/GetDiaryEvents", mapOf("start" to day.toString(), "end" to day.plusDays(1).toString()), cookies, ua, xhr = true, json = true, http = http)
 
     /** One GET to the portal with the saved session. [xhr] is how the page's own scripts ask for fragments; whole pages are asked for plainly. */
-    internal fun fetch(path: String, query: Map<String, String>, cookies: String, ua: String, xhr: Boolean, json: Boolean = false): Reply {
+    internal fun fetch(path: String, query: Map<String, String>, cookies: String, ua: String, xhr: Boolean, json: Boolean = false, http: OkHttpClient = client): Reply {
         val url = "$SITE$path".toHttpUrl().newBuilder().apply { query.forEach { (k, v) -> addQueryParameter(k, v) } }.build()
         val req = Request.Builder().url(url)
             .header("Accept", if (json) "application/json, text/javascript, */*; q=0.01" else "text/html,*/*;q=0.8")
@@ -231,7 +245,7 @@ object AmizoneSync {
             .header("User-Agent", ua)
             .header("Cookie", cookies)
             .build()
-        return client.newCall(req).execute().use { Reply(it.code, it.header("Content-Type"), it.body.string(), it.headers("Set-Cookie")) }
+        return http.newCall(req).execute().use { Reply(it.code, it.header("Content-Type"), it.body.string(), it.headers("Set-Cookie")) }
     }
 
     /** The timetable on screen is the last confirmed one; say so, in the app and on the widgets. */
@@ -254,6 +268,9 @@ object AmizoneSync {
     }
 
     internal fun expired(ctx: Context): SyncResult {
+        // Once per lapse: how long since Amizone last accepted the sign-in tells a sleeping phone (a long gap) apart from
+        // Amizone ending sign-ins on its own (a short one). Only the gap and the phone's battery settings go out.
+        if (!ctx.sessionExpired) CrashReporting.noteSessionExpired(ctx, ctx.prefs.getLong("sessionOkAt", 0))
         ctx.prefs.edit().putBoolean("sessionExpired", true).apply()
         markUnconfirmed(ctx)
         val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -281,6 +298,7 @@ object AmizoneSync {
         AttendanceStore.clear(ctx)
         WorkManager.getInstance(ctx).cancelUniqueWork("amizone")
         WorkManager.getInstance(ctx).cancelUniqueWork("amizone-keepalive")
+        KeepAlive.cancel(ctx)
         ctx.getSystemService(NotificationManager::class.java).cancel(SIGN_IN_ID)
         AppDb.get(ctx).deleteAmizone().forEach { Scheduler.cancel(ctx, it) }
         Scheduler.rescheduleAll(ctx)
@@ -301,26 +319,75 @@ object AmizoneSync {
         val keep = PeriodicWorkRequestBuilder<KeepAliveWorker>(2, TimeUnit.HOURS)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
         WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("amizone-keepalive", ExistingPeriodicWorkPolicy.KEEP, keep)
+        KeepAlive.ensure(ctx)
     }
 }
 
-/** When the keep-alive may run: from 7:00 up to (not including) 23:00, Amizone time. Overnight it does nothing. */
+const val KEEPALIVE = "com.rishabh.clockdown.KEEPALIVE"
+
+/**
+ * The sign-in keep-alive, day and night. Amizone's sign-in runs out about 150 minutes after it was last renewed, and an
+ * ASP.NET sign-in is only renewed by a request once half of that has passed. So one tiny request every hour keeps it at
+ * most about two hours old, with room to spare. Background jobs can't promise that (Android postpones them for hours
+ * while the phone sleeps), so this is an alarm that fires even then; Android gives an app a few seconds of network when
+ * one does, which is enough for the one request. If exact alarms are switched off it falls back to a looser alarm.
+ */
+object KeepAlive {
+    const val EVERY_MS = 60 * 60_000L
+
+    private fun pending(ctx: Context) = PendingIntent.getBroadcast(
+        ctx, -2, Intent(ctx, AlarmReceiver::class.java).setAction(KEEPALIVE),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    /** The next keep-alive, an hour from now unless [at] says otherwise (debug tests). Replaces any one already set. */
+    fun schedule(ctx: Context, at: Long = System.currentTimeMillis() + EVERY_MS) {
+        ctx.prefs.edit().putLong("keepAliveAt", at).apply()
+        Scheduler.exact(ctx, at, pending(ctx))
+    }
+
+    /**
+     * Starts the chain unless a keep-alive is already on its way, so opening the app never pushes the next one back.
+     * [afterBoot]: a restart wipes every alarm, so set it again whatever the saved time says.
+     */
+    fun ensure(ctx: Context, afterBoot: Boolean = false) {
+        if (!ctx.amizoneConnected || ctx.sessionExpired) return
+        if (afterBoot || keepAliveMissing(ctx.prefs.getLong("keepAliveAt", 0), System.currentTimeMillis())) schedule(ctx)
+    }
+
+    fun cancel(ctx: Context) {
+        ctx.getSystemService(android.app.AlarmManager::class.java).cancel(pending(ctx))
+        ctx.prefs.edit().remove("keepAliveAt").apply()
+    }
+
+    /** The alarm went off. Call off the main thread. The next one is set first, so a failed request never ends the chain. */
+    fun fired(ctx: Context) {
+        // Signed out, or the sign-in already lapsed: stop until the next sign-in starts the chain again (see ensure).
+        if (!ctx.amizoneConnected || ctx.sessionExpired) return cancel(ctx)
+        schedule(ctx)
+        AmizoneSync.keepAlive(ctx)
+    }
+}
+
+/** No keep-alive is due: never set, or its time passed more than 10 minutes ago (lost to a force stop, say). */
+fun keepAliveMissing(dueAt: Long, now: Long) = dueAt == 0L || now - dueAt > 10 * 60_000L
+
+/** When the background update check may run: from 7:00 up to (not including) 23:00, Amizone time, so it never notifies at night. */
 fun keepAliveWindow(t: java.time.LocalTime) = t.hour in 7..22
 
+/** A second line of defence for the keep-alive alarm (and the update check). Android may run it late; that's fine. */
 class KeepAliveWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
-    // Android may run this late (Doze, strict battery savers); that's fine, the one-tap reconnect is the fallback.
     override fun doWork(): Result {
-        if (keepAliveWindow(java.time.LocalTime.now(AMIZONE_ZONE))) {
-            UpdateChecker.backgroundRun(applicationContext) // also looks for a new app version, so its notification is at most ~2 hours late
-            AmizoneSync.keepAlive(applicationContext)
-        }
+        if (keepAliveWindow(java.time.LocalTime.now(AMIZONE_ZONE))) UpdateChecker.backgroundRun(applicationContext) // its notification is at most ~2 hours late
+        KeepAlive.ensure(applicationContext)
+        AmizoneSync.keepAlive(applicationContext)
         return Result.success()
     }
 }
 
 class SyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     override fun doWork(): Result =
-        AmizoneSync.run(applicationContext).let { result ->
+        AmizoneSync.run(applicationContext).also { KeepAlive.ensure(applicationContext) }.let { result ->
             // The attendance rides along on this existing check (at most every 3 hours), so it adds no background work of its own.
             if (result == SyncResult.OK) AttendanceWakeups.enqueue(applicationContext, 3 * 3_600_000L, "attendance-periodic")
             // The LMS has its own session, so it is read even when Amizone's sign-in has lapsed (see LmsSync).
@@ -337,7 +404,7 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
  *    filled in for you. Details from a failed attempt are never saved.
  *  - If saved details exist, the page's own Login button is pressed for you, once, and only when the page itself says
  *    the form is ready: Turnstile has issued its token AND the page has seen a real touch (its own bot check, which we
- *    do not fake). If anything goes wrong we stop and show the form. It can never retry (see [AutoLogin]).
+ *    do not fake). If Amizone sends it back, it tries once more on a fresh page, then stops and shows the form (see [AutoLogin]).
  * Nothing is ever logged, and the captcha token is never read, copied, replayed or solved by us.
  */
 class LoginActivity : ComponentActivity() {
@@ -466,6 +533,8 @@ class LoginActivity : ComponentActivity() {
                 val cookies = CookieManager.getInstance().getCookie(SITE)
                 if (LoginDetector.signedIn(url, cookies)) { signedIn(view, cookies!!); return }
                 if (isLoginPage(url)) {
+                    // A WebView can report the same page finishing twice within a moment: that is one load, not a refusal.
+                    if (loginShownAt > 0 && !reloading && System.currentTimeMillis() - loginShownAt < SAME_LOAD_MS) return
                     // The form loading a second time (not via Retry) means Login was pressed and Amizone said no.
                     val refusedAfter = if (loginShownAt > 0 && !reloading) (System.currentTimeMillis() - loginShownAt) / 1000 else null
                     loginShownAt = System.currentTimeMillis()
@@ -574,10 +643,19 @@ class LoginActivity : ComponentActivity() {
         finish()
     }
 
-    /** Amizone sent us back to the login page after our one automatic attempt: stop for good and let the user type. */
+    /** Amizone sent us back to the login page after an automatic attempt: one more try on a fresh page, then let the user type. */
     private fun failAfterSubmit() {
-        failed = true
         handler.removeCallbacksAndMessages(null)
+        if (AutoLogin.tryAgain(CredentialStore.noteAutoRefused(applicationContext))) {
+            auto = AutoLogin(hasDetails = true, rejected = false, recentlyTried = false)
+            prefilled = false
+            say("Amizone didn't accept that sign-in. Trying once more…")
+            clearPortalCookies()
+            reloading = true // a fresh form, not a refusal
+            web.loadUrl(SITE)
+            return
+        }
+        failed = true
         CredentialStore.markRejected(applicationContext)
         say("Your saved login didn't work, so it won't be tried again. Please type your Amizone ID and password. (If you changed your password, this fixes it.)")
     }
@@ -642,6 +720,7 @@ class LoginActivity : ComponentActivity() {
         const val WATCHDOG_MS = 20_000L
         const val CAPTCHA_STUCK_MS = 45_000L   // Turnstile normally finishes in a few seconds
         const val LOAD_TIMEOUT_MS = 20_000L    // nothing loaded after this long: stop waiting and offer Retry
+        const val SAME_LOAD_MS = 2_000L         // two "finished" reports this close together are the same page load
         const val COOL_DOWN_MS = 2 * 60_000L   // a new login screen within this long of an automatic attempt won't auto-submit
     }
 }

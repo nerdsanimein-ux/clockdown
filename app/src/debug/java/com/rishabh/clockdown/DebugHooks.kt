@@ -135,12 +135,20 @@ class DebugHooks : BroadcastReceiver() {
                 val pending = goAsync()
                 kotlin.concurrent.thread {
                     val before = Session.cookies(ctx)
-                    AmizoneSync.keepAlive(ctx)
-                    pending.resultData = "keepalive ran; cookieChanged=${Session.cookies(ctx) != before} expired=${ctx.sessionExpired} session=${Session.active(ctx)}"
+                    val outcome = AmizoneSync.keepAlive(ctx)
+                    pending.resultData = "keepalive ran: $outcome; cookieChanged=${Session.cookies(ctx) != before} expired=${ctx.sessionExpired} session=${Session.active(ctx)}"
                     pending.finish()
                 }
                 return
             }
+            // Sets the real keep-alive alarm to go off in `seconds` (default 60), e.g. while the emulator is forced into Doze.
+            // KEEPALIVE_LAST then reports what that alarm's request got: "ok", "expired", "no connection (...)".
+            "com.rishabh.clockdown.DEBUG_KEEPALIVE_SOON" -> {
+                KeepAlive.schedule(ctx, System.currentTimeMillis() + intent.getIntExtra("seconds", 60) * 1000L)
+                setResultData("keep-alive alarm set; due=${ctx.prefs.getLong("keepAliveAt", 0)}")
+                return
+            }
+            "com.rishabh.clockdown.DEBUG_KEEPALIVE_LAST" -> { setResultData("last=${ctx.prefs.getString("keepAliveLast", "none")} due=${ctx.prefs.getLong("keepAliveAt", 0)} now=${System.currentTimeMillis()}"); return }
             // One GET of an Amizone path (extras: path, q="a=b&c=d", xhr) with the saved session; body saved to files/fetch.txt.
             "com.rishabh.clockdown.DEBUG_FETCH" -> {
                 val path = intent.getStringExtra("path") ?: "/Home"

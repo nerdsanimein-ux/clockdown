@@ -19,7 +19,7 @@ Get Clockdown on Google Play: **[play.google.com/store/apps/details?id=com.risha
 
 **Installed Clockdown from this page before?** Open Clockdown on Google Play (or **Settings → Check for updates** in the app) and tap **Update**. It's the same app, so your timetable, timers and sign-in stay as they are. Versions from this page stopped getting updates after 1.9.3.
 
-**Staying signed in to Amizone:** Amizone's sign-in only lasts about 2½ hours unless it's used, so between 7 am and 11 pm Clockdown makes one tiny request roughly every 2 hours to keep it renewed. Overnight it does nothing; if Android delays it (battery savers) or the sign-in lapses, the one-tap reconnect still works.
+**Staying signed in to Amizone:** Amizone's sign-in only lasts about 2½ hours unless it's used, so Clockdown makes one tiny request every hour, day and night, to keep it renewed. It uses an alarm, which Android lets run even while the phone sleeps; background jobs can be postponed for hours. If the sign-in still lapses (no internet for hours, or Android's battery setting for Clockdown is "Restricted"), the one-tap reconnect still works.
 
 ## For developers
 

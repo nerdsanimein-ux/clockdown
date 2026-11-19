@@ -55,6 +55,7 @@ class AlarmReceiver : BroadcastReceiver() {
                 async { Scheduler.refreshWidget(ctx); AttendanceWakeups.classStarted(ctx) }
             }
             REFRESH -> async { Scheduler.refreshWidget(ctx); AttendanceWakeups.refreshTick(ctx) }
+            KEEPALIVE -> async { KeepAlive.fired(ctx) }
             DISMISS -> { nm.cancel(id); Alarms.stopRinging(ctx) }
             SNOOZE -> { nm.cancel(id); Alarms.stopRinging(ctx); Scheduler.snooze(ctx, id, name, room) }
         }
@@ -66,6 +67,7 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) = async {
         if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) UpdateNotice.updated(ctx)
         Scheduler.rescheduleAll(ctx)
+        KeepAlive.ensure(ctx, afterBoot = true)
     }
 }
 
