@@ -91,6 +91,47 @@ class AttendanceTest {
         try { AttendanceParse.history(historyPage.replace("[14:01-14:55]", "[x]").replace("> 0 <", "> two <")); fail() } catch (e: AttendanceParse.AttendanceFormatException) { assertEquals("history-format", e.kind) }
     }
 
+    // ---- Gwalior: My Courses redirects to "Flexi Courses", shaped like the real page (names and numbers invented)
+
+    private val flexiPage = """<table><thead class="cf"><tr><th>Course Code</th><th>Course Name</th></tr></thead><tbody>
+        <tr> <td data-title="Course Code">AB143</td> <td data-title="Course Name">SAMPLE SCIENCE – I</td> <td data-title="Type">Compulsory</td>
+        <td data-title="Session Plans"><button onclick="FnShowothercampus('1000001')" class="btn">View</button></td>
+        <td data-title="Attendance"><button onclick="FnAttendance('1000001')"class="btn-xs btn btn-purple btn-block"><i class="ace-icon">36/39 (92.31)</i> </button> </td> </tr>
+        </tbody></table><table><tbody>
+        <tr> <td data-title="Group Name">Psychology</td> <td data-title="Course Code">CD111</td> <td data-title="Subject Name">INTRODUCTORY EXAMPLES</td>
+        <td data-title="Type">Compulsory</td> <td data-title="Credit">4.00</td>
+        <td data-title="Session Plans"><button onclick="FnShowothercampuss('2001','7001')" class="btn">View</button></td>
+        <td data-title="Attendance"><button onclick="FnattendanceFlaxi('2001','7001')" class="btn-xs btn btn-purple "><i class="ace-icon">37/42 (88.10)</i></button></td> </tr>
+        </tbody></table>"""
+
+    @Test fun gwaliorsFlexiCoursesPageIsRead() {
+        val c = AttendanceParse.courses(flexiPage)
+        assertEquals(listOf("AB143", "CD111"), c.map { it.code })
+        assertEquals("INTRODUCTORY EXAMPLES", c[1].name) // "Subject Name" on a group subject
+        assertEquals(36, c[0].attended); assertEquals(39, c[0].total)
+        assertEquals("/Academics/FlaxiCourses/_Attendance" to mapOf("id" to "1000001"), AttendanceParse.historyRequest(c[0]))
+        assertEquals("/Academics/FlaxiCourses/_AttendanceDetailsFlaxi" to mapOf("cid" to "2001", "sgid" to "7001"), AttendanceParse.historyRequest(c[1]))
+        assertEquals("/Academics/MyCourses/_Attendancefoo" to mapOf("cid" to "11", "sgid" to "21"), AttendanceParse.historyRequest(AttendanceParse.courses(listPage)[0]))
+        // Survives being saved: the next sync must ask the same page.
+        val back = AttendanceStore.fromJson(AttendanceStore.toJson(AttSnapshot(c, 1)))
+        assertEquals(c, back.courses)
+    }
+
+    @Test fun gwaliorsHistoryWithItsStrayQuotesIsRead() {
+        val total = """<tr> <td data-title="Sno"> 0 </td> <td data-title="Date Of Class"> </td> <td data-title="Timings Of Class''"> Total </td> <td data-title="Present"> 3 </td> <td data-title="Absent"> 1 </td> <td data-title="Remarks"> 75.00 <br /> </td> </tr>"""
+        val page = historyPage.replace("data-title=\"Timings Of Class\"", "data-title=\"Timings Of Class''\"").replace("</table>", "$total</table>")
+        val r = AttendanceParse.history(page)
+        assertEquals(3, r.size) // the Total row is not a class
+        assertEquals(listOf("09:30-10:25", "10:26-11:20"), r.first { it.date == LocalDate.of(2026, 8, 27) }.slots)
+    }
+
+    @Test fun onlyARedirectWithinAcademicsIsFollowed() {
+        assertEquals("/Academics/FlaxiCourses/", Reply(302, null, "", location = "/Academics/FlaxiCourses/").academicsRedirect())
+        assertNull(Reply(302, null, "", location = "/Login/logout").academicsRedirect()) // signed out
+        assertNull(Reply(302, null, "", location = "https://evil.example/Academics/x").academicsRedirect())
+        assertNull(Reply(200, null, "", location = "/Academics/FlaxiCourses/").academicsRedirect())
+    }
+
     @Test fun aCourseWithNoRecordAtAllIsEmptyNotAFailure() {
         assertEquals(0, AttendanceParse.history("<h1> Record Not Exit </h1>").size)
     }
@@ -213,5 +254,10 @@ class AttendanceTest {
         assertEquals(Verdict.PROBLEM, SessionCheck.classifyPage(500, "<html>Error.</html>", marker)) // a server problem is not a dead sign-in
         assertEquals(Verdict.PROBLEM, SessionCheck.classifyPage(503, "", marker))
         assertNull(SessionCheck.classifyPage(200, "<html>a different page</html>", marker)) // page changed shape
+    }
+
+    @Test fun failureReportsSayWhereARedirectWentButNeverTheQuery() {
+        assertEquals("302 /Login/logout", Reply(302, "text/html", "", location = "/Login/logout?ReturnUrl=%2fHome").shape())
+        assertEquals("403", Reply(403, "text/html", "").shape())
     }
 }

@@ -421,6 +421,9 @@ private fun HomeScreen(
     val timers = upcoming.filter { it.source == MANUAL }
     val week = classes.groupBy { it.day() }.toSortedMap()
     var weekOpen by rememberSaveable { mutableStateOf(false) }
+    // Timers whose time has come, newest first. Nothing was ever deleted when a timer passed, so this goes back to the first one.
+    val past = events.filter { it.source == MANUAL && it.startMillis <= now }.sortedByDescending { it.startMillis }
+    var pastOpen by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -466,7 +469,8 @@ private fun HomeScreen(
             if (BuildConfig.SELF_UPDATE) item(key = "moved-to-play", span = full) { MovedToPlayCard() } // GitHub build only
 
             if (connected) item(key = "attendance", span = full) { AttendanceCard(attendance, attFailure, expired, onAttendance) }
-            if (connected) item(key = "holidays", span = full) { HolidaysCard(holidays, onHolidays) }
+            // Only when Amizone lists some: Gwalior's calendar has none, and "Tap to see" would open an empty page.
+            if (connected && holidays.isNotEmpty()) item(key = "holidays", span = full) { HolidaysCard(holidays, onHolidays) }
 
             if (batteryRevoked) item(key = "battery", span = full) { BatteryWarning(onBatteryFix, onBatteryDismiss) }
 
@@ -501,9 +505,15 @@ private fun HomeScreen(
                 EventCard(e, now, Modifier.animateItem().enter(timers.indexOf(e) + 2), onClick = { onEdit(e) })
             }
 
+            // Past timers, newest first. Collapsed by default.
+            if (past.isNotEmpty()) {
+                item(key = "h-past", span = full) { FoldHeader("Past timers", "${past.size}", pastOpen) { pastOpen = !pastOpen } }
+                if (pastOpen) items(past, key = { "p${it.id}" }, span = { GridItemSpan(maxLineSpan) }) { e -> PastRow(e, Modifier.animateItem()) { onEdit(e) } }
+            }
+
             // This week: a compact agenda of every upcoming class by day, collapsed by default.
             if (classes.isNotEmpty()) {
-                item(key = "h-week", span = full) { WeekHeader(classes.size, weekOpen) { weekOpen = !weekOpen } }
+                item(key = "h-week", span = full) { FoldHeader("This week", "${classes.size} classes", weekOpen) { weekOpen = !weekOpen } }
                 if (weekOpen) {
                     week.forEach { (day, list) ->
                         item(key = "wd$day", span = full) { DayLabel(day, today) }
@@ -516,15 +526,15 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun WeekHeader(count: Int, open: Boolean, onToggle: () -> Unit) {
+private fun FoldHeader(title: String, detail: String, open: Boolean, onToggle: () -> Unit) {
     val turn by animateFloatAsState(if (open) 180f else 0f, spring(dampingRatio = 0.7f, stiffness = 400f), label = "chevron")
     Row(
         Modifier.fillMaxWidth().padding(top = 12.dp).clip(MaterialTheme.shapes.medium).clickable(onClick = onToggle).padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("This week", style = MaterialTheme.typography.headlineMedium)
+        Text(title, style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.width(10.dp))
-        Text("$count classes", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(detail, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.weight(1f))
         Icon(Icons.Filled.KeyboardArrowDown, contentDescription = if (open) "Collapse" else "Expand", modifier = Modifier.rotate(turn).size(32.dp))
     }
@@ -538,6 +548,22 @@ private fun DayLabel(day: LocalDate, today: LocalDate) {
         else -> day.format(DAY_SHORT)
     }
     Text(label, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
+}
+
+/** A timer whose time has come: what it was and when. Tap to open it (to delete it, say). */
+@Composable
+private fun PastRow(e: Event, modifier: Modifier, onClick: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium, modifier = modifier.fillMaxWidth()) {
+        Row(Modifier.clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            EmojiBadge(e.emojiOrDefault(), paletteColor(e.colorIndex()), 36.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(e.title(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val start = e.startMillis.toLocal()
+                Text(start.format(DAY_SHORT) + " · " + start.format(TIME), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
 }
 
 /** One class in the weekly agenda: a compact row, not a card. */
@@ -743,6 +769,8 @@ private fun TimelineRow(e: Event, now: Long, first: Boolean, last: Boolean, modi
                     e.faculty?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     if (LocalUnconfirmed.current) Text("\u26A0 Unconfirmed", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary)
                     if (e.startMillis.toLocal().toLocalDate() == LocalDate.now(zone)) MarkLabel(LocalAttendance.current?.markFor(e))
+                    // Only while the class is on, so there's never more than one: photos go straight into its folder.
+                    if (live) ClassPhotoButton(e)
                 }
                 Spacer(Modifier.width(8.dp))
                 if (ended) {

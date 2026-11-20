@@ -31,6 +31,24 @@ class AmizoneParseTest {
     }
 
     @Test
+    fun gwaliorsPlainTitlesAndFacultyAreRead() {
+        // Gwalior: the title is the name alone (it can hold " - " itself), faculty is plain text with [id] or (id).
+        val g = """[
+          {"id":1,"title":"SAMPLE STUDIES - I","start":"2026/11/21 10:15:00 AM","end":"2026/11/21 11:10:00 AM","CourseCode":"EX142","sType":"C",
+           "FacultyName":"Dr Jane Doe[300001]","RoomNo":"101","AttndColor":"#3a87ad","url":"","allDay":false},
+          {"id":2,"title":"EXAMPLE LAB – I","start":"2026/11/21 01:15:00 PM","end":"2026/11/21 02:10:00 PM","CourseCode":"EX121","sType":"C",
+           "FacultyName":"Dr Ann Roe[300002],Dr Bo Poe[300003]","RoomNo":"101","AttndColor":"#4FCC4F","url":"","allDay":false},
+          {"id":3,"title":"MANAGER’S SAMPLE KIT","start":"2026/11/21 03:15:00 PM","end":"2026/11/21 04:10:00 PM","CourseCode":"EXAA1100","sType":"C",
+           "FacultyName":"Dr Cy Loe (300004)","RoomNo":"D-511","AttndColor":"#f00","url":"","allDay":false}
+        ]"""
+        val e = parseClasses(JSONArray(g))
+        assertEquals(listOf("SAMPLE STUDIES - I", "EXAMPLE LAB – I", "MANAGER’S SAMPLE KIT"), e.map { it.name })
+        assertEquals(listOf("Dr Jane Doe", "Dr Ann Roe, Dr Bo Poe", "Dr Cy Loe"), e.map { it.faculty })
+        assertEquals(listOf("EX142", "EX121", "EXAA1100"), e.map { it.courseCode })
+        assertEquals(listOf(null, "P", "A"), e.map { it.amizoneMark })
+    }
+
+    @Test
     fun anyNumberOfClassesInADayIsFine() {
         // Nothing assumes a particular timetable shape: none, one, or a packed day all parse.
         assertEquals(0, parseClasses(JSONArray("[]")).size)

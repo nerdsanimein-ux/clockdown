@@ -116,7 +116,11 @@ object LmsSso {
         val ua = Session.userAgent(ctx) ?: WebSettings.getDefaultUserAgent(ctx)
         val home = try { AmizoneSync.fetch("/Home", emptyMap(), amizone, ua, xhr = false) } catch (e: IOException) { return SsoResult.Failed("network") }
         when (home.verdict("submit.php")) {
-            Verdict.EXPIRED -> { AmizoneSync.expired(ctx); return SsoResult.AmizoneExpired }
+            Verdict.EXPIRED -> {
+                val out = try { AmizoneSync.signedOut(amizone, ua) } catch (e: IOException) { return SsoResult.Failed("network") }
+                if (!out) return SsoResult.Failed("amizone-home-${home.shape()}") // signed in, but this campus's Home page is different
+                AmizoneSync.expired(ctx); return SsoResult.AmizoneExpired
+            }
             Verdict.PROBLEM -> return SsoResult.Failed("amizone-http")
             Verdict.OK -> Session.renew(ctx, home.setCookies)
             null -> return SsoResult.NoForm // a normal Home page without an LMS card

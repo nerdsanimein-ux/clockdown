@@ -101,19 +101,24 @@ private fun JSONObject.str(key: String) = if (isNull(key)) null else optString(k
 /** Turns the GetDiaryEvents array into events sorted by start time. Throws on any malformed row. Holidays (sType "H", id 0) are not classes; see [parseHolidays]. */
 fun parseClasses(arr: JSONArray): List<Event> = (0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optString("sType") != "H" }.map { o ->
     val title = o.getString("title")
-    val code = o.str("CourseCode") ?: title.substringBefore(" - ")
+    val given = o.str("CourseCode")
+    val code = given ?: title.substringBefore(" - ")
+    // Most campuses title a class "XY101 - NAME"; Gwalior's title is the name alone, which can itself hold " - " ("STUDIES - I").
+    val name = if (given == null || title.startsWith("$given - ")) title.substringAfter(" - ", title) else title
     fun millis(key: String) = LocalDateTime.parse(o.getString(key), TIME).atZone(IST).toInstant().toEpochMilli()
     Event(
-        name = title.substringAfter(" - ", title).replace(Regex("\\s+"), " ").trim(),
+        name = name.replace(Regex("\\s+"), " ").trim(),
         startMillis = millis("start"),
         endMillis = millis("end"),
         alarmMinutes = 0,
         source = AMIZONE,
         amizoneId = o.getLong("id"),
         courseCode = code,
-        // FacultyName is HTML like "<b>Dr X (12345)</b> </br>Group/Sec - ...": keep just the name.
-        faculty = o.str("FacultyName")?.let { Regex("<b>(.*?)</b>").find(it)?.groupValues?.get(1) }
-            ?.replace(Regex("\\s*\\(\\d+\\)\\s*$"), "")?.trim()?.ifBlank { null },
+        // FacultyName is HTML like "<b>Dr X (12345)</b> </br>Group/Sec - ..." at most campuses, plain "Dr X[12345],Dr Y[678]"
+        // at Gwalior: keep just the names.
+        faculty = o.str("FacultyName")?.let { Regex("<b>(.*?)</b>").find(it)?.groupValues?.get(1) ?: it.takeIf { '<' !in it } }
+            ?.split(",")?.map { it.replace(Regex("\\s*[(\\[]\\d+[)\\]]\\s*$"), "").replace(Regex("\\s+"), " ").trim() }
+            ?.filter { it.isNotEmpty() }?.joinToString(", ")?.ifBlank { null },
         room = o.str("RoomNo"),
         amizoneMark = markOf(o.str("AttndColor")),
     )
@@ -129,10 +134,20 @@ fun markOf(color: String?): String? = when (color?.trim()?.uppercase()) {
     else -> null
 }
 
-/** What one request to the timetable endpoint returned. Cookies and headers are deliberately not kept. */
-internal class Reply(val code: Int, val contentType: String?, val body: String, val setCookies: List<String> = emptyList()) {
+/** What one request to the portal returned. Request cookies are deliberately not kept; [location] is where a redirect pointed. */
+internal class Reply(val code: Int, val contentType: String?, val body: String, val setCookies: List<String> = emptyList(), val location: String? = null) {
     /** What an HTML attendance page's answer means for the session; null = a normal page, but not the one we expected (it changed shape). */
     fun verdict(vararg markers: String): Verdict? = SessionCheck.classifyPage(code, body, markers)
+
+    /** A redirect to another page of the portal's Academics section (never to the login page): its path, else null. */
+    fun academicsRedirect(): String? {
+        if (code !in 300..399) return null
+        val u = runCatching { java.net.URI("$SITE/").resolve(location ?: return null) }.getOrNull() ?: return null
+        return u.path?.takeIf { u.host.equals("s.amizone.net", true) && u.scheme == "https" && it.startsWith("/Academics/") }
+    }
+
+    /** For a failure report: the HTTP code, and for a redirect where it went (the path only, never a query). */
+    fun shape() = "$code" + (location?.substringBefore('?')?.take(60)?.let { " $it" } ?: "")
 }
 
 object AmizoneSync {
@@ -245,8 +260,16 @@ object AmizoneSync {
             .header("User-Agent", ua)
             .header("Cookie", cookies)
             .build()
-        return http.newCall(req).execute().use { Reply(it.code, it.header("Content-Type"), it.body.string(), it.headers("Set-Cookie")) }
+        return http.newCall(req).execute().use { Reply(it.code, it.header("Content-Type"), it.body.string(), it.headers("Set-Cookie"), it.header("Location")) }
     }
+
+    /**
+     * Another page (attendance, Home) said "signed out". Campuses' pages differ: Amity Gwalior's attendance page sends a
+     * signed-in student somewhere else, which looked like a dead sign-in and looped them back to "Sign in" for ever. So
+     * believe it only when the timetable, which every campus answers the same way, says so too. ONE small request.
+     */
+    internal fun signedOut(cookies: String, ua: String): Boolean =
+        fetchDay(LocalDate.now(IST), cookies, ua).let { SessionCheck.classify(it.code, it.contentType, it.body) == Verdict.EXPIRED }
 
     /** The timetable on screen is the last confirmed one; say so, in the app and on the widgets. */
     private fun markUnconfirmed(ctx: Context) {

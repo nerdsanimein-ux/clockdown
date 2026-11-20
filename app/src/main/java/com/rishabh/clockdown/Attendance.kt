@@ -46,10 +46,14 @@ data class ClassRecord(val date: LocalDate, val slots: List<String>, val present
     val key get() = "$date ${slots.joinToString(",")}"
 }
 
-/** [tracked] is false for a course Amizone shows "NA" for. [cid]/[sgid] are what the history page is asked for. */
+/**
+ * [tracked] is false for a course Amizone shows "NA" for. [cid]/[sgid] are what the history page is asked for, and [via]
+ * which history page (see [AttendanceParse.historyRequest]): campuses differ.
+ */
 data class CourseAtt(
     val code: String, val name: String, val cid: String?, val sgid: String?,
     val tracked: Boolean, val attended: Int, val total: Int, val records: List<ClassRecord>,
+    val via: String = AttendanceParse.VIA_MY_COURSES,
 )
 
 data class AttSnapshot(val courses: List<CourseAtt>, val updatedAt: Long) {
@@ -140,27 +144,45 @@ object AttendanceParse {
     private val cellRx = Regex("<td[^>]*data-title=\"([^\"]*)\"[^>]*>(.*?)</td>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val tagRx = Regex("<[^>]*>")
     private val fraction = Regex("(\\d+)\\s*/\\s*(\\d+)")
+    // Which history a course's Attendance button opens. Most campuses (Gurugram, Noida) have the My Courses page; Gwalior's
+    // My Courses redirects to a "Flexi Courses" page, whose regular courses take one id and whose group subjects take two.
+    const val VIA_MY_COURSES = "foo"
+    const val VIA_FLEXI_ONE = "id"
+    const val VIA_FLEXI_GROUP = "flaxi"
     private val ids = Regex("Fnattendance2\\('(\\d+)'\\s*,\\s*'(\\d+)'\\)")
+    private val flexiGroupIds = Regex("FnattendanceFlaxi\\('(\\d+)'\\s*,\\s*'(\\d+)'\\)")
+    private val flexiOneId = Regex("FnAttendance\\('(\\d+)'\\)")
+
+    /** The address and query that the course's own Attendance button asks for. */
+    fun historyRequest(c: CourseAtt): Pair<String, Map<String, String>> = when (c.via) {
+        VIA_FLEXI_ONE -> "/Academics/FlaxiCourses/_Attendance" to mapOf("id" to c.cid.orEmpty())
+        VIA_FLEXI_GROUP -> "/Academics/FlaxiCourses/_AttendanceDetailsFlaxi" to mapOf("cid" to c.cid.orEmpty(), "sgid" to c.sgid.orEmpty())
+        else -> "/Academics/MyCourses/_Attendancefoo" to mapOf("cid" to c.cid.orEmpty(), "sgid" to c.sgid.orEmpty())
+    }
     private val slotRx = Regex("\\[(\\d\\d:\\d\\d)-(\\d\\d:\\d\\d)\\]")
     private val DATE = DateTimeFormatter.ofPattern("dd/MM/yyyy")
 
     private fun text(html: String) = tagRx.replace(html, " ").replace("&nbsp;", " ").replace("&amp;", "&").replace(Regex("\\s+"), " ").trim()
-    private fun cells(row: String) = cellRx.findAll(row).associate { it.groupValues[1].trim().lowercase() to it.groupValues[2] }
+    // trimEnd('\''): Gwalior's history page has a stray data-title="Timings Of Class''".
+    private fun cells(row: String) = cellRx.findAll(row).associate { it.groupValues[1].trim().trimEnd('\'').lowercase() to it.groupValues[2] }
 
     /** The My Courses page: one entry per course, history left empty for the caller to fill. */
     fun courses(html: String): List<CourseAtt> {
         val out = rowRx.findAll(html).map { it.groupValues[1] }.filter { it.contains(LIST_MARKER) }.map { row ->
             val c = cells(row)
             val code = text(c["course code"] ?: throw AttendanceFormatException("list-format"))
-            val name = text(c["course name"] ?: throw AttendanceFormatException("list-format"))
+            val name = text(c["course name"] ?: c["subject name"] ?: throw AttendanceFormatException("list-format")) // a Flexi group subject: "Subject Name"
             val cell = c["attendance"] ?: throw AttendanceFormatException("list-format")
             val shown = text(cell)
             val f = fraction.find(shown)
             when {
                 code.isEmpty() -> throw AttendanceFormatException("list-format")
                 f != null -> {
-                    val id = ids.find(cell)
-                    CourseAtt(code, name, id?.groupValues?.get(1), id?.groupValues?.get(2), true, f.groupValues[1].toInt(), f.groupValues[2].toInt(), emptyList())
+                    val (a, t) = f.groupValues[1].toInt() to f.groupValues[2].toInt()
+                    ids.find(cell)?.let { CourseAtt(code, name, it.groupValues[1], it.groupValues[2], true, a, t, emptyList()) }
+                        ?: flexiGroupIds.find(cell)?.let { CourseAtt(code, name, it.groupValues[1], it.groupValues[2], true, a, t, emptyList(), VIA_FLEXI_GROUP) }
+                        ?: flexiOneId.find(cell)?.let { CourseAtt(code, name, it.groupValues[1], null, true, a, t, emptyList(), VIA_FLEXI_ONE) }
+                        ?: CourseAtt(code, name, null, null, true, a, t, emptyList())
                 }
                 // Amizone doesn't track this course ("NA"): shown as "Not tracked".
                 shown.isEmpty() || shown.equals("NA", true) || shown.equals("N/A", true) || shown == "-" ->
@@ -177,8 +199,10 @@ object AttendanceParse {
         if (html.contains(NO_RECORD)) return emptyList()
         if (!html.contains(HISTORY_MARKER)) throw AttendanceFormatException("history-format")
         return try {
-            rowRx.findAll(html).map { it.groupValues[1] }.filter { it.contains("data-title=\"Sno\"", true) }.map { row ->
-                val c = cells(row)
+            rowRx.findAll(html).map { it.groupValues[1] }.filter { it.contains("data-title=\"Sno\"", true) }.map { cells(it) }
+                // Gwalior's group subjects end with a "Total" row in the same columns (Sno 0, no date): not a class.
+                .filterNot { text(it["timings of class"].orEmpty()).equals("Total", true) && text(it["date of class"].orEmpty()).isEmpty() }
+                .map { c ->
                 fun n(k: String) = text(c[k] ?: throw AttendanceFormatException("history-format")).toInt()
                 ClassRecord(
                     date = LocalDate.parse(text(c["date of class"] ?: throw AttendanceFormatException("history-format")), DATE),
@@ -206,7 +230,7 @@ object AttendanceStore {
     }
 
     fun toJson(s: AttSnapshot) = JSONObject().put("at", s.updatedAt).put("courses", JSONArray(s.courses.map { c ->
-        JSONObject().put("code", c.code).put("name", c.name).put("cid", c.cid).put("sgid", c.sgid).put("tracked", c.tracked)
+        JSONObject().put("code", c.code).put("name", c.name).put("cid", c.cid).put("sgid", c.sgid).put("via", c.via).put("tracked", c.tracked)
             .put("a", c.attended).put("t", c.total).put("records", JSONArray(c.records.map { r ->
                 JSONObject().put("d", r.date.toString()).put("s", JSONArray(r.slots)).put("p", r.present).put("x", r.absent).put("od", r.od)
             }))
@@ -222,6 +246,7 @@ object AttendanceStore {
                         ClassRecord(LocalDate.parse(r.getString("d")), r.getJSONArray("s").let { a -> (0 until a.length()).map(a::getString) }, r.getInt("p"), r.getInt("x"), r.getBoolean("od"))
                     }
                 },
+                c.optString("via", AttendanceParse.VIA_MY_COURSES), // saved before 2.2: always My Courses
             )
         },
         o.getLong("at"),
@@ -278,9 +303,11 @@ object AttendanceSync {
         val old = AttendanceStore.load(ctx)
 
         try {
-            val page = AmizoneSync.fetch("/Academics/MyCourses", emptyMap(), cookies, ua, xhr = false)
+            var page = AmizoneSync.fetch("/Academics/MyCourses", emptyMap(), cookies, ua, xhr = false)
+            // Gwalior's My Courses sends its students on to its Flexi Courses page: follow that one hop.
+            page.academicsRedirect()?.let { page = AmizoneSync.fetch(it, emptyMap(), cookies, ua, xhr = false) }
             when (page.verdict(AttendanceParse.LIST_MARKER)) {
-                Verdict.EXPIRED -> return AmizoneSync.expired(ctx).let { AttResult.EXPIRED }
+                Verdict.EXPIRED -> return if (AmizoneSync.signedOut(cookies, ua)) AmizoneSync.expired(ctx).let { AttResult.EXPIRED } else unreadable(ctx, "list-${page.shape()}")
                 Verdict.PROBLEM -> return failed(ctx, "network")
                 Verdict.OK -> Session.renew(ctx, page.setCookies)
                 null -> return unreadable(ctx, "list-format")
@@ -292,13 +319,14 @@ object AttendanceSync {
                 // History is only fetched when it could have changed: a different count, or nothing saved for a course that has classes.
                 val unchanged = same != null && same.tracked && same.attended == c.attended && same.total == c.total && (same.records.isNotEmpty() || c.total == 0)
                 when {
-                    !c.tracked || c.cid == null || c.sgid == null -> c
+                    !c.tracked || c.cid == null -> c
                     unchanged -> c.copy(records = same!!.records)
                     else -> {
                         if (i > 0) Thread.sleep(PAUSE_MS)
-                        val h = AmizoneSync.fetch("/Academics/MyCourses/_Attendancefoo", mapOf("cid" to c.cid, "sgid" to c.sgid), cookies, ua, xhr = true)
+                        val (path, query) = AttendanceParse.historyRequest(c)
+                        val h = AmizoneSync.fetch(path, query, cookies, ua, xhr = true)
                         when (h.verdict(AttendanceParse.HISTORY_MARKER, AttendanceParse.NO_RECORD)) {
-                            Verdict.EXPIRED -> return AmizoneSync.expired(ctx).let { AttResult.EXPIRED }
+                            Verdict.EXPIRED -> return if (AmizoneSync.signedOut(cookies, ua)) AmizoneSync.expired(ctx).let { AttResult.EXPIRED } else unreadable(ctx, "history-${h.shape()}")
                             Verdict.PROBLEM -> return failed(ctx, "network")
                             Verdict.OK -> {}
                             null -> return unreadable(ctx, "history-format")
