@@ -5,8 +5,9 @@
 Clockdown is on Google Play (`com.rishabh.clockdown`, Play Console organisation account Elocent). Since 1.9.3
 (code 18, GitHub release `18`) every new version goes out **only through Google Play**:
 
-1. Raise `versionCode` in `app/build.gradle.kts` above the last Play release (2.1.1 was 23, so the next is 24). The
-   `versionName` is the user's call: ask, never pick one unasked.
+1. Raise `versionCode` in `app/build.gradle.kts` above the last Play release (2.2 was 24, so the next is 25). The
+   `versionName` is the user's call: ask, never pick one unasked. Keep this file's facts current after each release
+   (version numbers and the like); that needs no asking.
 2. Build with `./gradlew bundlePlay` and upload `app/build/outputs/bundle/play/app-play.aab` to the Production track
    in Play Console (see `README.md`'s Releasing section).
 3. Once a release is in review, don't edit anything in Play Console: any change sends it back to the start of the
