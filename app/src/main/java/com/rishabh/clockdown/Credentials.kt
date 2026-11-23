@@ -52,18 +52,10 @@ object CredentialStore {
     /** Saving fresh details (a successful sign-in) also lifts any earlier "rejected" mark. */
     fun save(ctx: Context, id: String, password: String) {
         if (id.isBlank() || password.isEmpty()) return
-        sp(ctx)?.edit()?.putString("id", id)?.putString("pw", password)?.putBoolean("rejected", false)?.putInt("autoRefusals", 0)?.apply()
+        sp(ctx)?.edit()?.putString("id", id)?.putString("pw", password)?.putBoolean("rejected", false)?.apply()
     }
 
-    /** Amizone sent an automatic sign-in back. Returns how many times in a row that has now happened. */
-    fun noteAutoRefused(ctx: Context): Int {
-        val p = sp(ctx) ?: return AutoLogin.MAX_TRIES
-        val n = p.getInt("autoRefusals", 0) + 1
-        p.edit().putInt("autoRefusals", n).apply()
-        return n
-    }
-
-    /** A saved login that Amizone refused: keep it visible in Settings but never auto-submit it again. */
+    /** A saved login Amizone called wrong: keep it visible in Settings but never auto-submit it again. */
     fun markRejected(ctx: Context) { sp(ctx)?.edit()?.putBoolean("rejected", true)?.apply() }
 
     fun clear(ctx: Context) { sp(ctx)?.edit()?.clear()?.apply() }
@@ -114,12 +106,17 @@ class AutoLogin(private val hasDetails: Boolean, private val rejected: Boolean, 
 
     companion object {
         /**
-         * Automatic tries in a row before the saved login is set aside. Amizone sometimes sends a correct login back with
-         * no message (its captcha check, most likely), so one refusal gets one more try on a fresh page. A password that
-         * really changed is refused twice and then never filled in again until the person types the new one.
+         * Automatic tries per login screen. Amizone often sends a correct login back with no message (its captcha check,
+         * most likely: 74 of 80 refusals in Sentry, Nov 2026), so one refusal gets one more try on a fresh page.
          */
         const val MAX_TRIES = 2
         fun tryAgain(refusalsInARow: Int) = refusalsInARow < MAX_TRIES
+
+        /**
+         * Amizone's own words for wrong details: "Please check your credential !!". Only this sets the saved login aside;
+         * a refusal with no message keeps it, so Amizone's bad moments never cost anyone their saved password.
+         */
+        fun wrongDetails(amizoneMessage: String?) = amizoneMessage?.contains("credential", ignoreCase = true) == true
     }
 }
 

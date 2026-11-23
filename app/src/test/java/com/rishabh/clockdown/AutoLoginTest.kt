@@ -97,7 +97,15 @@ class LoginScriptsTest {
     @Test
     fun aRefusedAutomaticSignInGetsExactlyOneMoreTry() {
         assertTrue(AutoLogin.tryAgain(1))   // first refusal: Amizone sometimes sends a correct login back, try once more
-        assertFalse(AutoLogin.tryAgain(2))  // second in a row: set the saved login aside, the person types it
+        assertFalse(AutoLogin.tryAgain(2))  // second in a row: fill it in again and leave Login to the person
         assertFalse(AutoLogin.tryAgain(5))
+    }
+
+    @Test
+    fun onlyAmizoneSayingTheDetailsAreWrongSetsTheSavedLoginAside() {
+        assertTrue(AutoLogin.wrongDetails("Please check your credential !!"))
+        assertFalse(AutoLogin.wrongDetails(null))   // sent back with no message: Amizone's own check, keep the login
+        assertFalse(AutoLogin.wrongDetails(""))
+        assertFalse(AutoLogin.wrongDetails("Must be between 5 and 20 characters"))
     }
 }

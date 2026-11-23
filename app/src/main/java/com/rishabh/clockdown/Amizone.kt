@@ -427,7 +427,8 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
  *    filled in for you. Details from a failed attempt are never saved.
  *  - If saved details exist, the page's own Login button is pressed for you, once, and only when the page itself says
  *    the form is ready: Turnstile has issued its token AND the page has seen a real touch (its own bot check, which we
- *    do not fake). If Amizone sends it back, it tries once more on a fresh page, then stops and shows the form (see [AutoLogin]).
+ *    do not fake). If Amizone sends it back, it tries once more on a fresh page, then fills the saved login in and leaves
+ *    Login to the person. The saved login is set aside only when Amizone says the details are wrong (see [AutoLogin]).
  * Nothing is ever logged, and the captcha token is never read, copied, replayed or solved by us.
  */
 class LoginActivity : ComponentActivity() {
@@ -441,6 +442,8 @@ class LoginActivity : ComponentActivity() {
     private var loginShownAt = 0L
     private var lastAlert: String? = null
     private var reloading = false
+    /** Automatic sign-ins Amizone has sent back on this screen. */
+    private var autoRefusals = 0
     private lateinit var web: WebView
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
@@ -562,8 +565,11 @@ class LoginActivity : ComponentActivity() {
                     val refusedAfter = if (loginShownAt > 0 && !reloading) (System.currentTimeMillis() - loginShownAt) / 1000 else null
                     loginShownAt = System.currentTimeMillis()
                     reloading = false
-                    if (refusedAfter != null) explainRefusal(auto.failedAfterSubmit(), refusedAfter)
-                    if (auto.failedAfterSubmit()) return failAfterSubmit() // we submitted and Amizone sent us back here
+                    if (auto.failedAfterSubmit()) { // we submitted and Amizone sent us back here
+                        handler.removeCallbacksAndMessages(null)
+                        return explainRefusal(true, refusedAfter ?: 0) { failAfterSubmit(it) }
+                    }
+                    if (refusedAfter != null) explainRefusal(false, refusedAfter)
                     startPolling()
                 }
             }
@@ -611,7 +617,7 @@ class LoginActivity : ComponentActivity() {
     }
 
     /** Amizone sent the form back after Login: say so plainly (with Amizone's own words if it gave any) and report the facts. */
-    private fun explainRefusal(byApp: Boolean, seconds: Long) {
+    private fun explainRefusal(byApp: Boolean, seconds: Long, then: (amizoneMessage: String?) -> Unit = {}) {
         val alert = lastAlert.also { lastAlert = null }
         web.evaluateJavascript(LoginScripts.READ_ERROR) { raw ->
             // evaluateJavascript hands the string back JSON-quoted.
@@ -622,6 +628,7 @@ class LoginActivity : ComponentActivity() {
                 "Amizone didn't accept that sign-in" + (message?.let { ": \"$it\"" } ?: ".") +
                     " Check your ID and password, complete the captcha again, and press Login straight after it turns green.",
             )
+            then(message)
         }
     }
 
@@ -666,10 +673,20 @@ class LoginActivity : ComponentActivity() {
         finish()
     }
 
-    /** Amizone sent us back to the login page after an automatic attempt: one more try on a fresh page, then let the user type. */
-    private fun failAfterSubmit() {
+    /**
+     * Amizone sent us back to the login page after an automatic attempt. "Wrong details": set the saved login aside.
+     * No reason given (its own check, most of the time): one more try on a fresh page, then fill the saved login in again
+     * and leave Login to the person, keeping it for next time.
+     */
+    private fun failAfterSubmit(amizoneMessage: String?) {
         handler.removeCallbacksAndMessages(null)
-        if (AutoLogin.tryAgain(CredentialStore.noteAutoRefused(applicationContext))) {
+        if (AutoLogin.wrongDetails(amizoneMessage)) {
+            failed = true
+            CredentialStore.markRejected(applicationContext)
+            say("Amizone says your saved login is wrong, so it won't be tried again. Please type your Amizone ID and password. (If you changed your password, this fixes it.)")
+            return
+        }
+        if (AutoLogin.tryAgain(++autoRefusals)) {
             auto = AutoLogin(hasDetails = true, rejected = false, recentlyTried = false)
             prefilled = false
             say("Amizone didn't accept that sign-in. Trying once more…")
@@ -678,9 +695,12 @@ class LoginActivity : ComponentActivity() {
             web.loadUrl(SITE)
             return
         }
-        failed = true
-        CredentialStore.markRejected(applicationContext)
-        say("Your saved login didn't work, so it won't be tried again. Please type your Amizone ID and password. (If you changed your password, this fixes it.)")
+        // No more automatic presses on this screen (recentlyTried), and a refusal from here on is the person's own.
+        auto = AutoLogin(hasDetails = true, rejected = false, recentlyTried = true)
+        CredentialStore.get(this)?.let { web.evaluateJavascript(LoginScripts.prefill(it.first, it.second), null) }
+        prefilled = true
+        say("Amizone didn't accept the automatic sign-in. Your saved login is filled in: complete the captcha if it asks, then press Login.")
+        startPolling()
     }
 
     private fun startPolling() {
