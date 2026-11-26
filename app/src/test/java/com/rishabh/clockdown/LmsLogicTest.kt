@@ -220,4 +220,23 @@ class LmsLogicTest {
         assertTrue(js.endsWith("}catch(e){}})();"))
         assertFalse(js.contains(".click(")); assertFalse(js.contains(".submit(")); assertFalse(js.contains(".value")) // never presses or fills anything
     }
+
+    @Test
+    fun onlyAQuizSendingAnswersIsWatched() {
+        assertTrue(LmsQuizSend.isSend("https://alms06.amizone.net/moodle_26odd/mod/quiz/processattempt.php"))
+        assertTrue(LmsQuizSend.isSend("https://alms06.amizone.net/moodle_26odd/mod/quiz/processattempt.php?cmid=5"))
+        assertFalse(LmsQuizSend.isSend("https://alms06.amizone.net/moodle_26odd/mod/quiz/summary.php?attempt=9"))
+        assertFalse(LmsQuizSend.isSend("https://alms06.amizone.net/moodle_26odd/mod/quiz/review.php?attempt=9"))
+        assertFalse(LmsQuizSend.isSend("not a url %%"))
+    }
+
+    @Test
+    fun aStuckQuizSendLeadsBackToThatQuizsOwnPage() {
+        val base = "https://alms06.amizone.net/moodle_26odd/mod/quiz"
+        assertEquals("mod/quiz/view.php?id=73735", LmsQuizSend.quizPage("$base/summary.php?attempt=99&cmid=73735"))
+        assertEquals("mod/quiz/view.php?id=73735", LmsQuizSend.quizPage("$base/attempt.php?cmid=73735&attempt=99&page=2"))
+        assertNull(LmsQuizSend.quizPage("$base/summary.php?attempt=99")) // no cmid: the app falls back to the website
+        assertNull(LmsQuizSend.quizPage("$base/summary.php?attempt=99&cmid=7a")) // only plain numbers go into an address
+        assertNull(LmsQuizSend.quizPage(null))
+    }
 }

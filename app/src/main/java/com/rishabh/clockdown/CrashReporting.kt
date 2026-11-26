@@ -156,6 +156,39 @@ object CrashReporting {
         Sentry.captureEvent(event)
     }
 
+    /**
+     * A quiz page sent answers to the LMS and the next page hadn't finished loading 20 seconds later. Only how long it waited,
+     * the LMS's HTTP status if it sent one, whether any page appeared, the load progress, the names of other websites the page
+     * was loading from (host names only, e.g. "cdn.example.com"), Wi-Fi or mobile data and the WebView version. Never an
+     * address, the course or anything from the quiz.
+     */
+    fun noteQuizSendStuck(ctx: Context, seconds: Long, httpStatus: Int?, pageShown: Boolean, progress: Int, otherHosts: List<String>) {
+        if (!Sentry.isEnabled()) return
+        val event = SentryEvent().apply {
+            level = SentryLevel.WARNING
+            message = Message().apply { formatted = "LMS quiz send got stuck"; message = formatted }
+        }
+        event.setTag("quiz.secondsWaiting", seconds.toString())
+        event.setTag("quiz.httpStatus", httpStatus?.toString() ?: "none")
+        event.setTag("quiz.pageShown", pageShown.toString())
+        event.setTag("quiz.progress", progress.toString())
+        event.setExtra("otherHosts", otherHosts.take(20).joinToString(", ").ifEmpty { "none" })
+        event.setTag("quiz.network", network(ctx))
+        WebView.getCurrentWebViewPackage()?.versionName?.let { event.setTag("quiz.webviewVersion", it) }
+        Sentry.captureEvent(event)
+    }
+
+    /** "wifi", "mobile", "other" or "none": the kind of connection, nothing more. */
+    fun network(ctx: Context): String {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "none"
+        return when {
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+            else -> "other"
+        }
+    }
+
     private fun clean(event: SentryEvent): SentryEvent {
         event.user = null
         event.request = null

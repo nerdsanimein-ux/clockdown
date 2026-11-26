@@ -89,6 +89,24 @@ object LmsStyle {
 }
 
 /**
+ * A quiz page sending answers to the LMS (Next page, or "Submit all and finish"). On 26 Nov 2026 the page after "Submit all
+ * and finish" stayed blank and loading, although the LMS had recorded the submit; the student thought it failed. So when the
+ * page after a send hasn't finished within [STUCK_MS], the student is offered the quiz's own page, which shows whether it
+ * is submitted, and the facts are reported so the cause can be found.
+ */
+object LmsQuizSend {
+    const val STUCK_MS = 20_000L
+    fun isSend(url: String) = runCatching { java.net.URI(url).path.orEmpty().endsWith("/mod/quiz/processattempt.php") }.getOrDefault(false)
+
+    /** The quiz's own page ("mod/quiz/view.php?id=5"), from the address of the quiz page that sent (it carries cmid), or null. */
+    fun quizPage(sendingPageUrl: String?): String? {
+        val q = runCatching { java.net.URI(sendingPageUrl ?: return null).rawQuery }.getOrNull() ?: return null
+        val cmid = q.split('&').firstNotNullOfOrNull { p -> p.substringAfter("cmid=", "").takeIf { p.startsWith("cmid=") } }
+        return cmid?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }?.let { "mod/quiz/view.php?id=$it" }
+    }
+}
+
+/**
  * Moodle's own page, in the app, signed in with the LMS session. Used for the upload page, quizzes, wikis, links and "Open in
  * browser". Only amizone.net pages load here; any other address opens in the phone's browser instead.
  */
@@ -104,6 +122,34 @@ class LmsWebActivity : ComponentActivity() {
     private var pageTitle by mutableStateOf("")
     private var chooserCallback: ValueCallback<Array<Uri>>? = null
     private var chooserParams: WebChromeClient.FileChooserParams? = null
+
+    // A quiz send in flight: when it started (0 = none), whether a page appeared since, the LMS's HTTP status if it sent one,
+    // the quiz's own page, and the other websites the page loaded from since (host names only, to spot one that hangs).
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    @Volatile private var sendStartedAt = 0L
+    private var sendShown = false
+    private var sendStatus: Int? = null
+    private var sendQuizPage: String? = null
+    private val sendHosts = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private var sendStuck by mutableStateOf(false)
+    private val sendCheck = Runnable {
+        if (sendStartedAt == 0L) return@Runnable
+        sendStuck = true
+        CrashReporting.noteQuizSendStuck(this, (System.currentTimeMillis() - sendStartedAt) / 1000, sendStatus, sendShown, loadProgress, sendHosts.sorted())
+    }
+
+    private fun sendDone() { sendStartedAt = 0L; sendStuck = false; handler.removeCallbacks(sendCheck) }
+
+    /** "Check the quiz": stop the stuck page and open the quiz's own page, which says whether the attempt is submitted. */
+    private fun checkQuiz() {
+        sendDone()
+        val w = web ?: return
+        val page = sendQuizPage
+        val base = LmsSession.base(this)
+        if (page == null || base == null) { openInBrowser(this, firstUrl.substringAfter("$base/")); return }
+        w.stopLoading()
+        w.loadUrl("$base/$page")
+    }
 
     private val pickFile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         deliver(WebChromeClient.FileChooserParams.parseResult(r.resultCode, r.data))
@@ -180,6 +226,16 @@ class LmsWebActivity : ComponentActivity() {
                         })
                     }
                     noViewer?.let { NoViewerDialog(it) { noViewer = null } }
+                    if (sendStuck) AlertDialog(
+                        onDismissRequest = { sendStuck = false },
+                        title = { Text("The quiz page is taking too long") },
+                        text = {
+                            Text("The page after your quiz hasn't finished loading for 20 seconds. Your quiz may already be submitted.\n\n" +
+                                "Tap Check the quiz to see its status before you try again.")
+                        },
+                        confirmButton = { Button(onClick = ::checkQuiz) { Text("Check the quiz") } },
+                        dismissButton = { TextButton(onClick = { sendStuck = false }) { Text("Keep waiting") } },
+                    )
                 }
             }
         }
@@ -189,6 +245,7 @@ class LmsWebActivity : ComponentActivity() {
     override fun onDestroy() {
         // A pending chooser must still be answered, or the page's own file button would stop working until reload.
         chooserCallback?.onReceiveValue(null); chooserCallback = null
+        handler.removeCallbacksAndMessages(null)
         web?.destroy(); web = null
         super.onDestroy()
     }
@@ -204,6 +261,17 @@ class LmsWebActivity : ComponentActivity() {
     private var shownAPage = false // false until a Moodle page has actually been drawn here
 
     private fun client() = object : WebViewClient() {
+        // Watched from the moment the request leaves: onPageStarted only comes once the LMS starts answering, so a send that
+        // gets no answer at all would never be noticed there. Called on a background thread; nothing is changed or blocked.
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            if (request.isForMainFrame && LmsQuizSend.isSend(request.url.toString())) handler.post {
+                sendStartedAt = System.currentTimeMillis(); sendShown = false; sendStatus = null; sendHosts.clear()
+                sendQuizPage = LmsQuizSend.quizPage(view.url)
+                handler.removeCallbacks(sendCheck)
+                handler.postDelayed(sendCheck, LmsQuizSend.STUCK_MS)
+            } else if (sendStartedAt > 0) request.url.host?.lowercase()?.takeIf { !it.endsWith("amizone.net") }?.let { sendHosts.add(it) }
+            return null
+        }
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
             // Inside a frame (a YouTube player in a section, say) the frame does its own thing: the page itself stays here.
@@ -215,8 +283,12 @@ class LmsWebActivity : ComponentActivity() {
             return true
         }
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { problem = null }
-        override fun onPageCommitVisible(view: WebView, url: String) { shownAPage = true; view.evaluateJavascript(LmsStyle.inject, null) }
+        override fun onPageCommitVisible(view: WebView, url: String) {
+            shownAPage = true; if (sendStartedAt > 0) sendShown = true
+            view.evaluateJavascript(LmsStyle.inject, null)
+        }
         override fun onPageFinished(view: WebView, url: String) {
+            sendDone() // only a page that fully loaded counts: a blank page still loading is exactly what students saw
             view.evaluateJavascript(LmsStyle.inject, null)
             pageTitle = view.title.orEmpty().substringBefore('|').trim()
             if (url.substringBefore('?').endsWith("/login/index.php")) signedOut(view)
@@ -225,6 +297,7 @@ class LmsWebActivity : ComponentActivity() {
             if (request.isForMainFrame) problem = "Couldn't reach the LMS. Check your connection and try again."
         }
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+            if (request.isForMainFrame && sendStartedAt > 0) sendStatus = errorResponse.statusCode
             if (request.isForMainFrame && errorResponse.statusCode >= 500) problem = "The LMS had a problem (HTTP ${errorResponse.statusCode}). Please try again."
         }
         override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {

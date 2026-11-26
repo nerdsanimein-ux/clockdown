@@ -632,15 +632,7 @@ class LoginActivity : ComponentActivity() {
         }
     }
 
-    private fun networkKind(): String {
-        val cm = getSystemService(android.net.ConnectivityManager::class.java)
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "none"
-        return when {
-            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
-            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
-            else -> "other"
-        }
-    }
+    private fun networkKind() = CrashReporting.network(this)
 
     /** The page didn't load: network, HTTP or TLS error, or nothing happened for [LOAD_TIMEOUT_MS]. Never for a page
      * that loaded but whose login attempt Amizone refused (see [failAfterSubmit]). */

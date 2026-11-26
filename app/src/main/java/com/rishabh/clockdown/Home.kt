@@ -18,6 +18,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.foundation.clickable
@@ -281,7 +282,7 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
     BackHandler(enabled = tab != 0) { tab = 0 } // the Attendance screens inside close first, then this goes back to Home
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Box {
       Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) {
-        CompositionLocalProvider(LocalUnconfirmed provides (unconfirmedSince != null), LocalAttendance provides attendance) { if (tab == 2) LmsTab(
+        CompositionLocalProvider(LocalUnconfirmed provides (unconfirmedSince != null), LocalAttendance provides attendance) { if (tab == 3) CommunityTab() else if (tab == 2) LmsTab(
             snap = lms, connected = connected, expired = expired, failure = lmsProblem, refreshing = lmsSyncing || syncing,
             onRefresh = ::refreshLms, onReconnect = { ctx.startActivity(Intent(ctx, LoginActivity::class.java)) }, onChanged = { tick++ }, openCmid = lmsCmid,
         ) else if (tab == 1) AttendanceTab(
@@ -312,6 +313,7 @@ fun App(editEventId: Int? = null, bindWidgetId: Int? = null, openAttendance: Boo
             NavigationBarItem(tab == 0, { tab = 0 }, icon = { Icon(Icons.Filled.Home, contentDescription = null) }, label = { Text("Home") })
             NavigationBarItem(tab == 1, { tab = 1 }, icon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) }, label = { Text("Attendance") })
             NavigationBarItem(tab == 2, { tab = 2 }, icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) }, label = { Text("LMS") })
+            NavigationBarItem(tab == 3, { tab = 3 }, icon = { Icon(Icons.Filled.Face, contentDescription = null) }, label = { Text("Community") })
         }
       }
 
